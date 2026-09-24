@@ -51,3 +51,13 @@ def test_fetch_data_no_aliases(tmp_path):
     assert result[0]["display_names"] == []
     assert result[0]["alias_count"] == 0
     assert result[0]["usage_count"] == 0
+
+
+def test_warn_if_large_below_threshold_is_silent(capsys):
+    wv.warn_if_large(wv.LARGE_DATASET_WARNING_THRESHOLD)
+    assert capsys.readouterr().out == ""
+
+
+def test_warn_if_large_above_threshold_prints_warning(capsys):
+    wv.warn_if_large(wv.LARGE_DATASET_WARNING_THRESHOLD + 1)
+    assert "表示が重くなる可能性があります" in capsys.readouterr().out

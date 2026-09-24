@@ -19,6 +19,8 @@ mb_alias_lineage/
 ├── board_parser.py     # MotionBoardボード定義ファイルの自動検出パーサー
 ├── match_aliases.py    # 突き合わせ・表記ゆれ検出・SQLiteへの保存
 ├── db_schema.sql       # 中間データを保存するSQLiteのスキーマ
+├── web_viewer.py       # lineage.dbをブラウザで見るための軽量ビューア(localhost限定)
+├── export_static.py    # lineage.dbを単一の静的HTMLに書き出す(社内配布用)
 └── main.py             # 全体を通しで実行するオーケストレーター
 ```
 
@@ -97,6 +99,28 @@ python match_aliases.py --columns dr_sum_columns.json --aliases board_aliases.js
 
 `lineage.db`（SQLite）にまとめて保存し、同じ物理カラムに
 複数の表示名が使われているケース（表記ゆれ候補）をコンソールに一覧出力します。
+
+### 結果をブラウザで見る
+
+```bash
+python web_viewer.py
+```
+
+`lineage.db`をもとに、検索・表記ゆれのハイライト付きの一覧をブラウザで
+表示します。**`localhost`のみで待ち受ける設計であり、実行したPC上からしか
+閲覧できません。複数人が使う共有サーバーに常時起動して使う用途には
+対応していません**（そのような使い方をしたい場合は認証機構の追加が別途必要です）。
+
+社内にメールやファイル共有で結果を配布したい場合は、代わりに以下でサーバー
+不要の単一HTMLファイルを生成できます（受け取った側はPython不要、ブラウザで
+開くだけで閲覧できます）。
+
+```bash
+python export_static.py
+```
+
+どちらも、カラム数が多い（目安として3000件超）場合はブラウザでの表示が
+重くなる可能性がある旨の警告が表示されます（現時点ではページネーション未対応）。
 
 ### まとめて実行
 

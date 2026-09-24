@@ -180,6 +180,18 @@ load();
 """
 
 
+# 全件をページネーション無しでブラウザに転送する設計のため、件数が多いと
+# 初期描画が重くなる可能性がある。本格的なページネーションは実データ規模が
+# 分かってから検討する(それまでの軽量な安全策として警告のみ出す)。
+LARGE_DATASET_WARNING_THRESHOLD = 3000
+
+
+def warn_if_large(row_count: int) -> None:
+    if row_count > LARGE_DATASET_WARNING_THRESHOLD:
+        print(f"※ カラム数が{row_count}件と多いため、ブラウザでの表示が重くなる可能性があります"
+              f"(現時点ではページネーション未対応です)")
+
+
 def fetch_data(db_path: str):
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
@@ -257,6 +269,10 @@ def main() -> None:
         print(f"エラー: {args.db} が見つかりません。")
         print("先に match_aliases.py を実行して lineage.db を作成してください。")
         return
+
+    with sqlite3.connect(args.db) as conn:
+        row_count = conn.execute("SELECT COUNT(*) FROM columns").fetchone()[0]
+    warn_if_large(row_count)
 
     server = HTTPServer(("localhost", args.port), Handler)
     server.db_path = args.db

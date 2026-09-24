@@ -18,12 +18,16 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from web_viewer import INDEX_HTML, fetch_data
+from web_viewer import INDEX_HTML, fetch_data, warn_if_large
 
 
 def build_static_html(db_path: str) -> str:
     data = fetch_data(db_path)
+    warn_if_large(len(data))
     data_json = json.dumps(data, ensure_ascii=False)
+    # 表示名・ボード名に"</script>"のような文字列が含まれていても<script>タグが
+    # 途中で終了しないよう、埋め込み前に"</"をエスケープする(JSONの値としては同じ意味のまま)
+    data_json = data_json.replace("</", "<\\/")
     generated_at = datetime.now().strftime("%Y-%m-%d %H:%M")
 
     html = INDEX_HTML

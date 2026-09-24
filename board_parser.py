@@ -34,6 +34,7 @@
 import argparse
 import json
 import re
+import zipfile
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -92,6 +93,25 @@ def _local_tag(tag: str) -> str:
     return tag.rsplit("}", 1)[-1] if "}" in tag else tag
 
 
+_XML_ENCODING_DECL_RE = re.compile(rb'<\?xml[^>]*encoding=["\']([^"\']+)["\']', re.IGNORECASE)
+
+
+def _parse_xml_bytes(content: bytes) -> ET.Element:
+    """Shift_JIS等、Pythonの標準XMLパーサー(expat)が`encoding=`宣言だけでは
+    直接デコードできない文字コードでも読めるようにする。
+    (例: <?xml version="1.0" encoding="Shift_JIS"?> はexpatに直接渡すと
+    "multi-byte encodings are not supported" で失敗するため、宣言を読み取って
+    Python側で先にデコードしてから渡す。)"""
+    try:
+        return ET.fromstring(content)
+    except ValueError:
+        match = _XML_ENCODING_DECL_RE.search(content[:200])
+        if not match:
+            raise
+        encoding = match.group(1).decode("ascii", errors="ignore")
+        return ET.fromstring(content.decode(encoding))
+
+
 class ColumnIndex:
     """dr_sum_columns.json から作る「カラム名 → 候補テーブル一覧」の索引。"""
 
@@ -146,13 +166,15 @@ def _extract_match(index: ColumnIndex, value: str) -> Optional[Tuple[str, Option
 # ============================================================
 # 自動検出モード: XML
 # ============================================================
-def auto_parse_xml(path: Path, index: ColumnIndex) -> List[AliasRecord]:
+def auto_parse_xml(source_name: str, content: bytes, index: ColumnIndex) -> List[AliasRecord]:
+    """source_nameは表示・フォールバック用のファイル名(ZIP内のエントリ名でもよい)。
+    contentは生バイト列で渡す(ET.fromstringがXML宣言のencoding指定を見て
+    自前でデコードするため、Shift-JIS等で書かれたファイルもそのまま渡せる)。"""
     try:
-        tree = ET.parse(path)
-    except ET.ParseError:
+        root = _parse_xml_bytes(content)
+    except (ET.ParseError, ValueError, LookupError, UnicodeDecodeError):
         return []
 
-    root = tree.getroot()
     records: List[AliasRecord] = []
 
     def find_label_on_element(el: ET.Element, matched_key: Optional[str], matched_val: str) -> Optional[str]:
@@ -190,7 +212,7 @@ def auto_parse_xml(path: Path, index: ColumnIndex) -> List[AliasRecord]:
                 child_text = (child.text or "").strip()
                 if child_text and _looks_like_name_key(_local_tag(child.tag)):
                     return child_text
-        return path.stem  # 見つからなければファイル名で代用
+        return Path(source_name).stem  # 見つからなければファイル名で代用
 
     def find_ancestor_id(stack: List[ET.Element]) -> str:
         for el in reversed(stack):  # 現在位置に近い方から探す
@@ -233,9 +255,10 @@ def auto_parse_xml(path: Path, index: ColumnIndex) -> List[AliasRecord]:
 # ============================================================
 # 自動検出モード: JSON
 # ============================================================
-def auto_parse_json(path: Path, index: ColumnIndex) -> List[AliasRecord]:
+def auto_parse_json(source_name: str, content: bytes, index: ColumnIndex) -> List[AliasRecord]:
+    """source_nameは表示・フォールバック用のファイル名(ZIP内のエントリ名でもよい)。"""
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(content.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError):
         return []
 
@@ -257,7 +280,7 @@ def auto_parse_json(path: Path, index: ColumnIndex) -> List[AliasRecord]:
             for k, v in node.items():
                 if isinstance(v, str) and _looks_like_name_key(str(k)) and v.strip():
                     return v.strip()
-        return path.stem
+        return Path(source_name).stem
 
     def find_ancestor_id(dict_stack: List[dict]) -> str:
         for node in reversed(dict_stack):
@@ -350,6 +373,32 @@ def auto_parse_json(path: Path, index: ColumnIndex) -> List[AliasRecord]:
     return records
 
 
+def _auto_parse_zip(zip_path: Path, index: ColumnIndex) -> List[AliasRecord]:
+    """ZIP内のXML/JSONエントリを、展開せずメモリ上で直接解析する。"""
+    records: List[AliasRecord] = []
+    try:
+        zf = zipfile.ZipFile(zip_path)
+    except zipfile.BadZipFile:
+        print(f"  ※{zip_path.name} はZIPとして読み込めませんでした(壊れている可能性があります)")
+        return records
+
+    with zf:
+        for name in zf.namelist():
+            if name.endswith("/"):
+                continue
+            label = f"{zip_path.name}:{name}"
+            if name.lower().endswith(".xml"):
+                recs = auto_parse_xml(name, zf.read(name), index)
+            elif name.lower().endswith(".json"):
+                recs = auto_parse_json(name, zf.read(name), index)
+            else:
+                continue
+            if recs:
+                print(f"  検出: {label} → {len(recs)}件")
+            records.extend(recs)
+    return records
+
+
 def auto_parse_all(root_dir: Path, columns_path: str) -> List[AliasRecord]:
     columns = json.loads(Path(columns_path).read_text(encoding="utf-8"))
     index = ColumnIndex(columns)
@@ -357,23 +406,27 @@ def auto_parse_all(root_dir: Path, columns_path: str) -> List[AliasRecord]:
     all_records: List[AliasRecord] = []
     xml_files = list(root_dir.rglob("*.xml"))
     json_files = list(root_dir.rglob("*.json"))
-    print(f"XML {len(xml_files)}件 / JSON {len(json_files)}件を自動検出モードで走査します")
+    zip_files = list(root_dir.rglob("*.zip"))
+    print(f"XML {len(xml_files)}件 / JSON {len(json_files)}件 / ZIP {len(zip_files)}件を自動検出モードで走査します")
 
     for path in xml_files:
-        recs = auto_parse_xml(path, index)
+        recs = auto_parse_xml(path.name, path.read_bytes(), index)
         if recs:
             print(f"  検出: {path.name} → {len(recs)}件")
         all_records.extend(recs)
 
     for path in json_files:
-        recs = auto_parse_json(path, index)
+        recs = auto_parse_json(path.name, path.read_bytes(), index)
         if recs:
             print(f"  検出: {path.name} → {len(recs)}件")
         all_records.extend(recs)
 
+    for zip_path in zip_files:
+        all_records.extend(_auto_parse_zip(zip_path, index))
+
     if not all_records:
-        print("  ※1件も検出できませんでした。ファイル形式がZIP圧縮/暗号化/独自バイナリの")
-        print("    可能性があります。inspect_file.py で中身を確認し、必要なら --manual を検討してください")
+        print("  ※1件も検出できませんでした。暗号化/独自バイナリ形式の可能性があります。")
+        print("    inspect_file.py で中身を確認し、必要なら --manual を検討してください")
 
     return all_records
 

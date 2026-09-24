@@ -9,24 +9,34 @@
     python inspect_file.py <調べたいフォルダのパス>   # フォルダなら中の各ファイルを一覧
 """
 import argparse
+import io
 import json
 import sys
+import zipfile
 from pathlib import Path
 from xml.etree import ElementTree as ET
+
+from board_parser import _parse_xml_bytes
+
+ZIP_ENTRY_DISPLAY_LIMIT = 20
 
 
 def guess_and_show(path: Path, max_depth: int = 4) -> None:
     print(f"\n=== {path} ===")
     print(f"サイズ: {path.stat().st_size:,} bytes")
+    _inspect_bytes(path.read_bytes(), max_depth)
 
-    head = path.read_bytes()[:200]
+
+def _inspect_bytes(content: bytes, max_depth: int) -> None:
+    """ファイル本体、またはZIP内エントリの中身を種類判定して表示する。"""
+    head = content[:200]
 
     # XML判定
     if head.lstrip().startswith(b"<?xml") or head.lstrip().startswith(b"<"):
         print("形式: XMLの可能性が高い")
         try:
-            _show_xml_tree(path, max_depth)
-        except ET.ParseError as e:
+            _show_xml_tree(content, max_depth)
+        except (ET.ParseError, ValueError, LookupError, UnicodeDecodeError) as e:
             print(f"  ※XMLとして読めませんでした: {e}")
         return
 
@@ -34,16 +44,17 @@ def guess_and_show(path: Path, max_depth: int = 4) -> None:
     if head.lstrip().startswith(b"{") or head.lstrip().startswith(b"["):
         print("形式: JSONの可能性が高い")
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
+            data = json.loads(content.decode("utf-8"))
             _show_json_tree(data, max_depth)
         except (UnicodeDecodeError, json.JSONDecodeError) as e:
             print(f"  ※JSONとして読めませんでした: {e}")
         return
 
-    # ZIP/バイナリ判定（先頭マジックナンバーで簡易判定）
+    # ZIP判定（先頭マジックナンバーで簡易判定）。中のXML/JSONエントリを
+    # ディスクに展開せず、そのまま再帰的に中身を表示する。
     if head[:2] == b"PK":
-        print("形式: ZIP圧縮されている可能性あり(中にXML/JSONを含むケースが多い)")
-        print("  → zipfileモジュールで展開してから再度このツールにかけてください")
+        print("形式: ZIP圧縮ファイル。中身を展開して表示します")
+        _show_zip_contents(content, max_depth)
         return
 
     print("形式: 未知/バイナリの可能性あり")
@@ -53,9 +64,28 @@ def guess_and_show(path: Path, max_depth: int = 4) -> None:
     print("    切り替える方が現実的です")
 
 
-def _show_xml_tree(path: Path, max_depth: int, indent: int = 0) -> None:
-    tree = ET.parse(path)
-    root = tree.getroot()
+def _show_zip_contents(content: bytes, max_depth: int) -> None:
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(content))
+    except zipfile.BadZipFile as e:
+        print(f"  ※ZIPとして読めませんでした: {e}")
+        return
+
+    with zf:
+        names = [n for n in zf.namelist() if not n.endswith("/")]
+        print(f"  {len(names)}件のエントリが見つかりました"
+              f"(最大{ZIP_ENTRY_DISPLAY_LIMIT}件まで表示)")
+        for name in names[:ZIP_ENTRY_DISPLAY_LIMIT]:
+            entry_bytes = zf.read(name)
+            print(f"\n  --- ZIP内: {name} ({len(entry_bytes):,} bytes) ---")
+            _inspect_bytes(entry_bytes, max_depth)
+        remaining = len(names) - ZIP_ENTRY_DISPLAY_LIMIT
+        if remaining > 0:
+            print(f"\n  ... 他{remaining}件のエントリを省略 ...")
+
+
+def _show_xml_tree(content: bytes, max_depth: int) -> None:
+    root = _parse_xml_bytes(content)
 
     def walk(el: ET.Element, depth: int) -> None:
         if depth > max_depth:

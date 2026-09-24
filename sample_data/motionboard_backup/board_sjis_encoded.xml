@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="Shift_JIS"?>
+<Board name="文字コード確認">
+  <Item id="sjis-001">
+    <Field column="TANKA" label="単価"/>
+    <Field column="SHOHIN_NAME" label="商品名"/>
+  </Item>
+</Board>

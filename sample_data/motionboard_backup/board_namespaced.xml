@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mb:Board xmlns:mb="http://example.com/motionboard" mb:name="名前空間テスト">
+  <mb:Item mb:id="ns-001">
+    <mb:Field mb:column="TANKA" mb:label="単価"/>
+    <mb:Field mb:column="SHOHIN_NAME" mb:label="商品名"/>
+  </mb:Item>
+</mb:Board>

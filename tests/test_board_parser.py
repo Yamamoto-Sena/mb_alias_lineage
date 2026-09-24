@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from xml.etree import ElementTree as ET
 
 import board_parser as bp
 
@@ -26,11 +27,12 @@ def find(records, board_name, item_id, column_name):
 
 class TestAutoParseAllTotals:
     def test_total_record_count(self):
-        assert len(all_records()) == 32
+        assert len(all_records()) == 38
 
     def test_sample_data_file_count(self):
-        assert len(list(BACKUP_DIR.glob("*.xml"))) == 9
+        assert len(list(BACKUP_DIR.glob("*.xml"))) == 11
         assert len(list(BACKUP_DIR.glob("*.json"))) == 3
+        assert len(list(BACKUP_DIR.glob("*.zip"))) == 1
 
 
 class TestRegressionPatterns:
@@ -67,6 +69,27 @@ class TestRegressionPatterns:
 
     def test_parallel_arrays_json(self):
         r = find(all_records(), "在庫単価一覧", "arr-001", "TANKA")
+        assert r.display_name == "単価"
+
+
+class TestAdditionalRobustnessPatterns:
+    """ZIP圧縮・XML名前空間・Shift-JIS宣言への対応を固定する回帰テスト。"""
+
+    def test_xml_namespace_prefix(self):
+        # <mb:Field mb:column="..." mb:label="..."/> のような名前空間プレフィックス付き属性
+        r = find(all_records(), "名前空間テスト", "ns-001", "TANKA")
+        assert r.display_name == "単価"
+
+    def test_shift_jis_declared_xml(self):
+        # <?xml version="1.0" encoding="Shift_JIS"?>
+        # 修正前はexpatが直接デコードできず"multi-byte encodings are not
+        # supported"で例外になり、auto_parse_all全体がクラッシュしていた。
+        r = find(all_records(), "文字コード確認", "sjis-001", "TANKA")
+        assert r.display_name == "単価"
+
+    def test_zip_compressed_backup(self):
+        # ZIP内のXML/JSONエントリを展開せずメモリ上で解析できる
+        r = find(all_records(), "ZIP内ボード", "zip-001", "TANKA")
         assert r.display_name == "単価"
 
 
@@ -123,3 +146,28 @@ class TestHeuristicHelpers:
     def test_local_tag_strips_namespace(self):
         assert bp._local_tag("{http://example.com/ns}Title") == "Title"
         assert bp._local_tag("Title") == "Title"
+
+
+class TestParseXmlBytes:
+    def test_utf8_bytes(self):
+        root = bp._parse_xml_bytes('<Board name="テスト"/>'.encode("utf-8"))
+        assert root.tag == "Board"
+
+    def test_shift_jis_declared_bytes(self):
+        content = '<?xml version="1.0" encoding="Shift_JIS"?><Board name="テスト"/>'.encode("shift_jis")
+        root = bp._parse_xml_bytes(content)
+        assert root.attrib["name"] == "テスト"
+
+    def test_malformed_xml_raises(self):
+        import pytest
+        with pytest.raises(ET.ParseError):
+            bp._parse_xml_bytes(b"<Board><Unclosed>")
+
+
+class TestAutoParseXmlDoesNotCrashOnBadFiles:
+    def test_malformed_xml_returns_empty_list_not_exception(self):
+        assert bp.auto_parse_xml("broken.xml", b"<Board><Unclosed>", load_index()) == []
+
+    def test_undecodable_declared_encoding_returns_empty_list(self):
+        content = b'<?xml version="1.0" encoding="not-a-real-encoding"?><Board name="x"/>'
+        assert bp.auto_parse_xml("broken.xml", content, load_index()) == []

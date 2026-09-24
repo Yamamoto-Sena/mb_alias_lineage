@@ -40,7 +40,7 @@ python match_aliases.py --columns sample_data/dr_sum_columns.json --aliases boar
 JSON形式、というように、あえてタグ名も属性名も全て違う書き方にしてあり、
 自動検出モードがどんな構造でも同じように動くことを確認できます。
 
-実行すると32件のエイリアスが検出され、表記ゆれ候補が4件
+実行すると38件のエイリアスが検出され、表記ゆれ候補が4件
 （例: `URIAGE_KIN`が「売上金額」「Revenue」「売上」の3通りで
 使われている、など）見つかるはずです。
 
@@ -64,6 +64,14 @@ JSON形式、というように、あえてタグ名も属性名も全て違う�
 - `board_purchase_lookup.json` … カラムとラベルが`fieldDefs`/`fieldLabels`のように別々の対応表に分かれ、IDで紐付く構造
 - `board_parallel_arrays.json` … カラム名配列と表示名配列が同じインデックスで対応する構造
 
+さらに以下の3ファイルは、実物のバックアップでありがちな「ZIP圧縮」
+「XML名前空間」「Shift-JIS文字コード」への対応を確認するための
+回帰テスト用サンプルです。
+
+- `board_zipped_backup.zip` … ZIP圧縮されたボード定義(中に`board_in_zip.xml`を含む)。展開せずメモリ上で直接解析する
+- `board_namespaced.xml` … `<mb:Field mb:column="..." mb:label="..."/>`のようなXML名前空間プレフィックス付き
+- `board_sjis_encoded.xml` … `<?xml version="1.0" encoding="Shift_JIS"?>`宣言のファイル。**修正前はPython標準のXMLパーサーがこの宣言を直接デコードできず例外で処理全体が止まっていた**(`board_parser.py`の`_parse_xml_bytes`で回避)
+
 ## 使い方（実物のファイルが手に入ったら）
 
 ### ステップ1: Dr.Sum側のメタデータを取得する
@@ -81,11 +89,16 @@ JDBC経由でテーブル/ビュー/カラムの一覧を取得し、`dr_sum_col
 python board_parser.py path/to/backup/data/ --columns dr_sum_columns.json --out board_aliases.json
 ```
 
-指定フォルダ以下のXML/JSONファイルを再帰的に読み、既知のカラム名が
+指定フォルダ以下のXML/JSON/ZIPファイルを再帰的に読み、既知のカラム名が
 属性値やキー値としてどこかに出現していないか総当たりで探します。
 見つかったら、その近くにある「カラム名とは違う文字列」を表示名
 （エイリアス）候補として拾い、ボード名・アイテムIDも周辺のタグ・キーから
 推測します。実行結果に「検出: xxx.xml → N件」と出れば成功です。
+
+ZIPファイルは展開せずメモリ上で中のXML/JSONエントリを直接解析します
+（実行結果には「検出: xxx.zip:entry.xml → N件」のように表示されます）。
+また、XML名前空間プレフィックス付き（`<mb:Field mb:column="..."/>`）や
+Shift-JIS文字コード宣言のファイルにも対応しています。
 
 検証として、タグ名も属性名もまったく違う2種類のサンプル
 （`label`属性を使うものと`caption`属性を使うもの）で試したところ、

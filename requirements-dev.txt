@@ -1,0 +1,2 @@
+# テスト実行用(本番の requirements.txt には含めない)
+pytest==8.3.3

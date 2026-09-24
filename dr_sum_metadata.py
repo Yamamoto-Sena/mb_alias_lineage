@@ -13,9 +13,14 @@ TODO: 実環境の接続文字列の形式（JDBC URLの書式）はDr.Sumのバ
 import argparse
 import json
 import os
+import sys
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import List
+
+
+class DrSumConnectionError(RuntimeError):
+    """接続・メタデータ取得の失敗を、原因の推測+対処のヒント付きで伝えるための例外。"""
 
 
 @dataclass
@@ -49,15 +54,34 @@ class DrSumConnector:
         return f"jdbc:dsjdbc://{self.host}:{self.port}/{self.database}"
 
     def connect(self):
-        import jaydebeapi  # 遅延importにして、未インストールでも他機能を使えるようにする
+        if not Path(self.jdbc_jar).exists():
+            raise DrSumConnectionError(
+                f"JDBCドライバーのjarファイルが見つかりません: {self.jdbc_jar}\n"
+                "  → --jdbc-jar オプション(またはDR_SUM_JDBC_JAR環境変数)のパスを確認してください。"
+            )
+        try:
+            import jaydebeapi  # 遅延importにして、未インストールでも他機能を使えるようにする
+        except ImportError as e:
+            raise DrSumConnectionError(
+                "jaydebeapi (またはJPype1) がインストールされていません。\n"
+                "  → pip install -r requirements.txt を実行してください。"
+            ) from e
 
         driver_class = "jp.co.uwsc.drsum.jdbc.DsDriver"  # TODO: 正式なドライバークラス名に置換
-        self._conn = jaydebeapi.connect(
-            driver_class,
-            self._build_jdbc_url(),
-            [self.user, self.password],
-            self.jdbc_jar,
-        )
+        try:
+            self._conn = jaydebeapi.connect(
+                driver_class,
+                self._build_jdbc_url(),
+                [self.user, self.password],
+                self.jdbc_jar,
+            )
+        except Exception as e:
+            raise DrSumConnectionError(
+                f"Dr.Sumサーバーへの接続に失敗しました(host={self.host}, port={self.port}, "
+                f"db={self.database})。\n"
+                "  → host/port/db/user/jdbc-jarの値と、Dr.Sumサーバーへの疎通を確認してください。\n"
+                f"  元のエラー: {e}"
+            ) from e
         return self._conn
 
     def fetch_columns(self) -> List[ColumnMeta]:
@@ -79,9 +103,18 @@ class DrSumConnector:
             FROM INFORMATION_SCHEMA.COLUMNS
             ORDER BY TABLE_NAME, ORDINAL_POSITION
         """  # TODO: Dr.Sum固有のシステムカタログ名に置き換える
-        cursor.execute(query)
-        rows = cursor.fetchall()
-        cursor.close()
+        try:
+            cursor.execute(query)
+            rows = cursor.fetchall()
+        except Exception as e:
+            raise DrSumConnectionError(
+                "システムカタログのクエリに失敗しました。この環境のDr.Sumバージョンに\n"
+                "  合ったシステムカタログ名になっていない可能性があります。\n"
+                "  → fetch_columns() 内のSQLをTODOコメントに従って調整してください。\n"
+                f"  元のエラー: {e}"
+            ) from e
+        finally:
+            cursor.close()
 
         return [
             ColumnMeta(
@@ -122,6 +155,8 @@ def main() -> None:
     parser.add_argument("--out", default="dr_sum_columns.json")
     parser.add_argument("--stub", action="store_true",
                          help="実接続せずダミーデータで動作確認する")
+    parser.add_argument("--debug", action="store_true",
+                         help="接続失敗時に元の例外のスタックトレースも表示する")
     args = parser.parse_args()
 
     if args.stub:
@@ -134,8 +169,14 @@ def main() -> None:
             host=args.host, database=args.db, user=args.user,
             password=args.password, jdbc_jar=args.jdbc_jar, port=args.port,
         )
-        connector.connect()
-        columns = connector.fetch_columns()
+        try:
+            connector.connect()
+            columns = connector.fetch_columns()
+        except DrSumConnectionError as e:
+            print(f"エラー: {e}", file=sys.stderr)
+            if args.debug:
+                raise
+            sys.exit(1)
 
     out_path = Path(args.out)
     out_path.write_text(

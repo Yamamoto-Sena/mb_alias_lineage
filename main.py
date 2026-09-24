@@ -14,13 +14,22 @@
 import argparse
 import subprocess
 import sys
+from pathlib import Path
+from typing import Optional
 
 
-def run(cmd: list) -> None:
+def run(cmd: list, expect_file: Optional[str] = None) -> None:
+    step_name = cmd[1] if len(cmd) > 1 else cmd[0]
     print(f"\n$ {' '.join(cmd)}")
     result = subprocess.run(cmd)
     if result.returncode != 0:
+        print(f"\nエラー: ステップ「{step_name}」が失敗しました(exit code {result.returncode})",
+              file=sys.stderr)
         sys.exit(result.returncode)
+    if expect_file and not Path(expect_file).exists():
+        print(f"\nエラー: ステップ「{step_name}」は正常終了しましたが、"
+              f"期待される出力ファイル {expect_file} が生成されませんでした", file=sys.stderr)
+        sys.exit(1)
 
 
 def main() -> None:
@@ -36,20 +45,28 @@ def main() -> None:
     py = sys.executable
 
     if args.stub:
-        run([py, "dr_sum_metadata.py", "--stub", "--out", "dr_sum_columns.json"])
-        run([py, "board_parser.py", "--stub", "--out", "board_aliases.json"])
+        run([py, "dr_sum_metadata.py", "--stub", "--out", "dr_sum_columns.json"],
+            expect_file="dr_sum_columns.json")
+        run([py, "board_parser.py", "--stub", "--out", "board_aliases.json"],
+            expect_file="board_aliases.json")
     else:
         if not (args.backup_dir and args.host and args.db and args.user and args.jdbc_jar):
             parser.error("--stub を使わない場合は --backup-dir --host --db --user --jdbc-jar が必須です")
         run([py, "dr_sum_metadata.py", "--host", args.host, "--db", args.db,
-             "--user", args.user, "--jdbc-jar", args.jdbc_jar, "--out", "dr_sum_columns.json"])
+             "--user", args.user, "--jdbc-jar", args.jdbc_jar, "--out", "dr_sum_columns.json"],
+            expect_file="dr_sum_columns.json")
         # 自動検出モード: Dr.Sumのカラム一覧を手がかりにタグ構造を推測するので、
         # ボード定義ファイルのタグ名を事前に調べる必要はない
         run([py, "board_parser.py", args.backup_dir,
-             "--columns", "dr_sum_columns.json", "--out", "board_aliases.json"])
+             "--columns", "dr_sum_columns.json", "--out", "board_aliases.json"],
+            expect_file="board_aliases.json")
 
     run([py, "match_aliases.py", "--columns", "dr_sum_columns.json", "--aliases", "board_aliases.json"])
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n中断しました", file=sys.stderr)
+        sys.exit(130)

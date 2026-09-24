@@ -1,4 +1,49 @@
+import sys
+
+import pytest
+
 import dr_sum_metadata as dsm
+
+
+class _FailingCursor:
+    def execute(self, query):
+        raise RuntimeError("system catalog not found")
+
+    def fetchall(self):
+        return []
+
+    def close(self):
+        pass
+
+
+class _FakeConnection:
+    def cursor(self):
+        return _FailingCursor()
+
+
+def test_connect_raises_friendly_error_for_missing_jar(tmp_path):
+    connector = dsm.DrSumConnector(
+        host="h", database="d", user="u", password="p",
+        jdbc_jar=str(tmp_path / "does_not_exist.jar"),
+    )
+    with pytest.raises(dsm.DrSumConnectionError, match="jarファイルが見つかりません"):
+        connector.connect()
+
+
+def test_connect_raises_friendly_error_when_library_missing(tmp_path, monkeypatch):
+    monkeypatch.setitem(sys.modules, "jaydebeapi", None)  # importが必ずImportErrorになるようにする
+    jar = tmp_path / "fake.jar"
+    jar.write_bytes(b"")
+    connector = dsm.DrSumConnector(host="h", database="d", user="u", password="p", jdbc_jar=str(jar))
+    with pytest.raises(dsm.DrSumConnectionError, match="jaydebeapi"):
+        connector.connect()
+
+
+def test_fetch_columns_wraps_query_error():
+    connector = dsm.DrSumConnector(host="h", database="d", user="u", password="p", jdbc_jar="whatever.jar")
+    connector._conn = _FakeConnection()
+    with pytest.raises(dsm.DrSumConnectionError, match="システムカタログ"):
+        connector.fetch_columns()
 
 
 def test_fetch_columns_stub_shape():

@@ -55,3 +55,35 @@ def test_report_naming_inconsistencies_no_variants(tmp_path, capsys):
     ma.report_naming_inconsistencies(str(db_path))
     out = capsys.readouterr().out
     assert "表記ゆれ候補は見つかりませんでした" in out
+
+
+def test_build_db_rerun_is_idempotent(tmp_path):
+    # 同じ入力で2回実行しても、aliases/columnsの行数が増殖しないこと(重複追記バグの回帰テスト)
+    db_path = tmp_path / "lineage.db"
+    aliases = [
+        {"table_name": "T_A", "column_name": "COL1", "display_name": "表示A", "board_name": "board1", "item_id": "i1"},
+    ]
+    ma.build_db(str(db_path), COLUMNS, aliases)
+    ma.build_db(str(db_path), COLUMNS, aliases)
+
+    conn = sqlite3.connect(db_path)
+    alias_count = conn.execute("SELECT COUNT(*) FROM aliases").fetchone()[0]
+    column_count = conn.execute("SELECT COUNT(*) FROM columns").fetchone()[0]
+    conn.close()
+    assert alias_count == 1
+    assert column_count == 1
+
+
+def test_build_db_normalizes_fullwidth_and_case(tmp_path, capsys):
+    db_path = tmp_path / "lineage.db"
+    aliases = [
+        # 全角+小文字での参照でも、正規化キーでDr.Sum側の"T_A"."COL1"と一致するはず
+        {"table_name": "ｔ_ａ", "column_name": "ｃｏｌ１", "display_name": "表示A", "board_name": "board1", "item_id": "i1"},
+    ]
+    ma.build_db(str(db_path), COLUMNS, aliases)
+
+    conn = sqlite3.connect(db_path)
+    rows = conn.execute("SELECT table_name, column_name FROM columns").fetchall()
+    conn.close()
+    assert rows == [("T_A", "COL1")]  # "(不明)"として仮登録されていない
+    assert "正規化により追加で一致した" in capsys.readouterr().out

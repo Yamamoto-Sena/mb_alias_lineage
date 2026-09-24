@@ -9,11 +9,20 @@ SQLite(lineage.db)に保存したうえで、表記ゆれ候補を一覧表示�
 import argparse
 import json
 import sqlite3
+import unicodedata
 from pathlib import Path
 
 
 def load_json(path: str):
     return json.loads(Path(path).read_text(encoding="utf-8"))
+
+
+def _normalize_key(table_name: str, column_name: str) -> tuple:
+    """全角/半角・大文字小文字の違いを吸収した突き合わせ用キーを作る。
+    保存する値そのものには使わない(表示・保存は元の表記のまま)。"""
+    def norm(s):
+        return unicodedata.normalize("NFKC", (s or "").strip()).upper()
+    return (norm(table_name), norm(column_name))
 
 
 def build_db(db_path: str, columns: list, aliases: list) -> None:
@@ -23,8 +32,10 @@ def build_db(db_path: str, columns: list, aliases: list) -> None:
 
     cur = conn.cursor()
 
-    # カラムを登録し、table_name+column_name -> id の対応表を作る
+    # カラムを登録し、table_name+column_name -> id の対応表を作る(完全一致キーと、
+    # 全角半角/大文字小文字を正規化したキーの両方を用意する)
     column_id_map = {}
+    normalized_id_map = {}
     for col in columns:
         cur.execute(
             """
@@ -39,13 +50,22 @@ def build_db(db_path: str, columns: list, aliases: list) -> None:
         )
         row = cur.fetchone()
         if row:
-            column_id_map[(col["table_name"], col["column_name"])] = row[0]
+            key = (col["table_name"], col["column_name"])
+            column_id_map[key] = row[0]
+            normalized_id_map[_normalize_key(*key)] = row[0]
 
-    # エイリアスを登録。Dr.Sum側にカラムが見つからない場合は警告して table_name="(不明)" で仮登録
+    # エイリアスを登録。完全一致で見つからなければ正規化キーで再試行し、
+    # それでも見つからない場合は警告して table_name="(不明)" で仮登録
     unmatched = 0
+    normalized_matches = 0
     for alias in aliases:
         key = (alias["table_name"], alias["column_name"])
         column_id = column_id_map.get(key)
+        if column_id is None:
+            column_id = normalized_id_map.get(_normalize_key(*key))
+            if column_id is not None:
+                normalized_matches += 1
+
         if column_id is None:
             unmatched += 1
             cur.execute(
@@ -64,7 +84,7 @@ def build_db(db_path: str, columns: list, aliases: list) -> None:
 
         cur.execute(
             """
-            INSERT INTO aliases (column_id, display_name, board_name, item_id)
+            INSERT OR IGNORE INTO aliases (column_id, display_name, board_name, item_id)
             VALUES (?, ?, ?, ?)
             """,
             (column_id, alias["display_name"], alias["board_name"], alias.get("item_id")),
@@ -73,6 +93,9 @@ def build_db(db_path: str, columns: list, aliases: list) -> None:
     conn.commit()
     conn.close()
 
+    if normalized_matches:
+        print(f"※ 全角半角/大文字小文字の正規化により追加で一致したエイリアスが"
+              f"{normalized_matches}件ありました")
     if unmatched:
         print(f"※ Dr.Sum側のカラム一覧に見つからないエイリアスが{unmatched}件ありました"
               f"（テーブル名の表記ゆれや、取得漏れの可能性があります）")

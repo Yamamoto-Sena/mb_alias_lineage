@@ -1,0 +1,15 @@
+{
+  "board": {
+    "boardName": "在庫アラート",
+    "panels": [
+      {
+        "panelId": "panel-inv-1",
+        "fields": [
+          {"physicalColumn": "ZAIKO_SU", "displayLabel": "在庫数"},
+          {"physicalColumn": "SOKO_CD", "displayLabel": "倉庫"},
+          {"physicalColumn": "SHOHIN_CD", "displayLabel": "商品コード"}
+        ]
+      }
+    ]
+  }
+}

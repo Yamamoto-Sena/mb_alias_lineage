@@ -1,0 +1,10 @@
+<Dashboard title="Overseas Summary">
+  <Widget id="w-99">
+    <DataBinding source="URIAGE_KIN" caption="Revenue"/>
+    <DataBinding source="CHIIKI_KBN" caption="Region"/>
+  </Widget>
+  <Widget id="w-100">
+    <DataBinding source="KOKYAKU_NAME" caption="Customer Name"/>
+  </Widget>
+</Dashboard>
+

@@ -1,0 +1,6 @@
+<Board name="単価確認一覧">
+  <Item id="txt-001">
+    <Field label="単価">TANKA</Field>
+    <Field label="商品名">SHOHIN_NAME</Field>
+  </Item>
+</Board>

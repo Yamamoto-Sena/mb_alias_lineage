@@ -1,0 +1,6 @@
+<Board name="仕入先別分析">
+  <Item id="qual-001">
+    <Field source="T_商品M.TANKA" label="単価"/>
+    <Field source="T_商品M.SHOHIN_NAME" label="商品名"/>
+  </Item>
+</Board>

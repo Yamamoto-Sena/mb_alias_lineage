@@ -1,0 +1,12 @@
+{
+  "board": {
+    "name": "在庫単価一覧",
+    "panels": [
+      {
+        "panelId": "arr-001",
+        "columns": ["TANKA", "SHOHIN_NAME"],
+        "displayNames": ["単価", "商品名"]
+      }
+    ]
+  }
+}

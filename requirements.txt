@@ -1,0 +1,4 @@
+# Dr.SumへのJDBC接続用（Development KitのJDBCドライバーjarと組み合わせて使う）
+# ※現状のスクリプトはこの2つだけで動きます。pandasやclickは今のところ未使用のため外してあります。
+JayDeBeApi==1.2.3
+JPype1==1.5.0

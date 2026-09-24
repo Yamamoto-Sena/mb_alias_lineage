@@ -1,0 +1,16 @@
+<Board name="支社別KPI">
+  <Group id="grp01">
+    <Panel id="panel-A">
+      <Chart>
+        <Series col="CHIIKI_KBN" dispName="エリア"/>
+        <Series col="URIAGE_KIN" dispName="売上"/>
+      </Chart>
+    </Panel>
+    <Panel id="panel-B">
+      <Chart>
+        <Series col="ZAIKO_SU" dispName="在庫数"/>
+        <Series col="SOKO_CD" dispName="倉庫コード"/>
+      </Chart>
+    </Panel>
+  </Group>
+</Board>

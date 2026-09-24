@@ -1,0 +1,19 @@
+{
+  "board": {
+    "name": "仕入先分析",
+    "items": [
+      {
+        "itemId": "lookup-001",
+        "fieldRefs": ["f1", "f2"]
+      }
+    ],
+    "fieldDefs": {
+      "f1": {"col": "TANKA"},
+      "f2": {"col": "SHOHIN_NAME"}
+    },
+    "fieldLabels": {
+      "f1": "単価",
+      "f2": "商品名"
+    }
+  }
+}

@@ -1,0 +1,15 @@
+[
+  {"table_name": "T_売上明細", "table_type": "TABLE", "column_name": "URIAGE_KIN", "data_type": "DECIMAL", "ordinal": 1},
+  {"table_name": "T_売上明細", "table_type": "TABLE", "column_name": "CHIIKI_KBN", "data_type": "VARCHAR", "ordinal": 2},
+  {"table_name": "T_売上明細", "table_type": "TABLE", "column_name": "URIAGE_DATE", "data_type": "DATE", "ordinal": 3},
+  {"table_name": "T_売上明細", "table_type": "TABLE", "column_name": "SHOHIN_CD", "data_type": "VARCHAR", "ordinal": 4},
+  {"table_name": "T_顧客M", "table_type": "TABLE", "column_name": "KOKYAKU_CD", "data_type": "VARCHAR", "ordinal": 1},
+  {"table_name": "T_顧客M", "table_type": "TABLE", "column_name": "KOKYAKU_NAME", "data_type": "VARCHAR", "ordinal": 2},
+  {"table_name": "T_顧客M", "table_type": "TABLE", "column_name": "GYOSHU_CD", "data_type": "VARCHAR", "ordinal": 3},
+  {"table_name": "T_在庫", "table_type": "TABLE", "column_name": "ZAIKO_SU", "data_type": "INTEGER", "ordinal": 1},
+  {"table_name": "T_在庫", "table_type": "TABLE", "column_name": "SOKO_CD", "data_type": "VARCHAR", "ordinal": 2},
+  {"table_name": "T_商品M", "table_type": "TABLE", "column_name": "SHOHIN_CD", "data_type": "VARCHAR", "ordinal": 1},
+  {"table_name": "T_商品M", "table_type": "TABLE", "column_name": "SHOHIN_NAME", "data_type": "VARCHAR", "ordinal": 2},
+  {"table_name": "T_商品M", "table_type": "TABLE", "column_name": "TANKA", "data_type": "DECIMAL", "ordinal": 3},
+  {"table_name": "V_売上_月次集計", "table_type": "VIEW", "column_name": "GETSUJI_URIAGE", "data_type": "DECIMAL", "ordinal": 1}
+]

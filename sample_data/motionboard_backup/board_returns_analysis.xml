@@ -1,0 +1,10 @@
+<Board name="返品分析">
+  <Item id="ret-001">
+    <Field column="TANKA">
+      <DisplayName>単価</DisplayName>
+    </Field>
+    <Field column="SHOHIN_NAME">
+      <DisplayName>商品名</DisplayName>
+    </Field>
+  </Item>
+</Board>

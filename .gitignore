@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.pyc
+
+# 作業用の一時ファイル
+_tmp_*
+
+# 実行のたびに生成される中間データ・成果物(ソースではない。ルート直下のみ対象。
+# sample_data/配下の同名フィクスチャは除外しない)
+/lineage.db
+/dr_sum_columns.json
+/board_aliases.json
+/column_alias_map.html

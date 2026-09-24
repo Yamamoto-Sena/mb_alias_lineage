@@ -1,0 +1,8 @@
+<Board name="仕入分析">
+  <Item seq="1">
+    <Field column="TANKA" label="単価"/>
+  </Item>
+  <Item itemNo="2">
+    <Field column="SHOHIN_NAME" label="商品名"/>
+  </Item>
+</Board>

@@ -57,3 +57,26 @@ def test_run_fails_when_expected_output_file_missing(monkeypatch):
         assert False, "SystemExitが発生するはず"
     except SystemExit as e:
         assert e.code == 1
+
+
+def test_main_demo_runs_two_steps_against_demo_data(monkeypatch, tmp_path):
+    calls = []
+
+    def fake_run(cmd):
+        calls.append(cmd)
+        if "board_parser.py" in cmd:
+            out = tmp_path / "demo_data" / "board_aliases.json"
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text("[]", encoding="utf-8")
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sys, "argv", ["main.py", "--demo"])
+    main_module.main()
+    assert len(calls) == 2
+    assert "board_parser.py" in calls[0]
+    assert "demo_data/motionboard_backup" in calls[0]
+    assert "demo_data/dr_sum_columns.json" in calls[0]
+    assert "match_aliases.py" in calls[1]
+    assert "demo_data/lineage.db" in calls[1]

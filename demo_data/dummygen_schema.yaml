@@ -1,0 +1,69 @@
+tables:
+- row_count: 1000
+  table_name: T_売上明細
+  columns:
+  - name: URIAGE_KIN
+    type: integer
+    min: 10000
+    max: 5000000
+  - name: CHIIKI_KBN
+    type: enum
+    choices:
+    - 関東
+    - 関西
+    - 中部
+    - 九州
+  - name: URIAGE_DATE
+    type: date
+    start: 2020-01-01
+    end: 2025-12-31
+    format: ymd
+  - name: SHOHIN_CD
+    type: pattern
+    pattern: SH-[0-9]{4}
+- row_count: 1000
+  table_name: T_顧客M
+  columns:
+  - name: KOKYAKU_CD
+    type: pattern
+    pattern: KC-[0-9]{5}
+  - name: KOKYAKU_NAME
+    type: name_ja
+    with_space: false
+  - name: GYOSHU_CD
+    type: enum
+    choices:
+    - 卸売業
+    - 小売業
+- row_count: 1000
+  table_name: T_在庫
+  columns:
+  - name: ZAIKO_SU
+    type: integer
+    min: 0
+    max: 500
+  - name: SOKO_CD
+    type: pattern
+    pattern: WH-[0-9]{3}
+- row_count: 1000
+  table_name: T_商品M
+  columns:
+  - name: SHOHIN_CD
+    type: pattern
+    pattern: SH-[0-9]{4}
+  - name: SHOHIN_NAME
+    type: enum
+    choices:
+    - ノートパソコン
+    - マウス
+  - name: TANKA
+    type: integer
+    min: 500
+    max: 50000
+- row_count: 1000
+  table_name: V_売上_月次集計
+  columns:
+  - name: GETSUJI_URIAGE
+    type: integer
+    min: 1000000
+    max: 80000000

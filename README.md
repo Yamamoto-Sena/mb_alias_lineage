@@ -21,8 +21,23 @@ mb_alias_lineage/
 ├── db_schema.sql       # 中間データを保存するSQLiteのスキーマ
 ├── web_viewer.py       # lineage.dbをブラウザで見るための軽量ビューア(localhost限定)
 ├── export_static.py    # lineage.dbを単一の静的HTMLに書き出す(社内配布用)
-└── main.py             # 全体を通しで実行するオーケストレーター
+├── main.py             # 全体を通しで実行するオーケストレーター
+└── demo_data/          # 社内説明・デモ用の合成データ(詳細はdemo_data/README.md)
 ```
+
+## 社内デモを見る
+
+実際のDr.Sum/MotionBoardへの接続がまだなくても、このツールが何をするものかを
+説明できるよう、[dummygen_jp_gui](../../dev_2/dummygen_jp_gui)(和風ダミーデータ
+生成ツール)で作成した架空データ一式を`demo_data/`に用意してあります。
+
+```bash
+python main.py --demo
+python web_viewer.py --db demo_data/lineage.db
+```
+
+`URIAGE_KIN`(売上金額/Revenue/売上)など、意図的に作り込んだ4件の表記ゆれが
+ブラウザ上でハイライト表示されます。詳細は`demo_data/README.md`を参照してください。
 
 ## 仮データで一気通貫に試す(実物のファイルがまだ無い場合)
 

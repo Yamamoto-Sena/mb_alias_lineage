@@ -12,3 +12,9 @@ _tmp_*
 /dr_sum_columns.json
 /board_aliases.json
 /column_alias_map.html
+
+# デモ用データ(demo_data/)の中間生成物。dr_sum_columns.json・motionboard_backup/・
+# dummygen_schema.yaml・build_dr_sum_columns.py はソースなので除外しない
+/demo_data/board_aliases.json
+/demo_data/lineage.db
+/demo_data/column_alias_map_demo.html

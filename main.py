@@ -4,12 +4,19 @@
 実接続がまだできない段階では --stub をつけて、
 ダミーデータでパイプライン全体の動作を確認できます。
 
+社内説明・デモ用には --demo をつけると、demo_data/ 以下の
+(dummygen_jp_guiで作成した)合成データで一気通貫のデモを再現できます。
+
 使い方（本番想定）:
     python main.py --backup-dir /path/to/backup/data \
         --host drsumserver --db mydb --user analyst --jdbc-jar /path/to/dwodsjd4.jar
 
 使い方（動作確認だけしたい場合）:
     python main.py --stub
+
+使い方（社内デモ用）:
+    python main.py --demo
+    python web_viewer.py --db demo_data/lineage.db
 """
 import argparse
 import subprocess
@@ -35,6 +42,8 @@ def run(cmd: list, expect_file: Optional[str] = None) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--stub", action="store_true", help="ダミーデータで一気通貫の動作確認をする")
+    parser.add_argument("--demo", action="store_true",
+                         help="demo_data/ の合成データで一気通貫のデモを再現する(社内説明用)")
     parser.add_argument("--backup-dir", help="MotionBoardのボード定義バックアップフォルダ")
     parser.add_argument("--host")
     parser.add_argument("--db")
@@ -43,6 +52,15 @@ def main() -> None:
     args = parser.parse_args()
 
     py = sys.executable
+
+    if args.demo:
+        run([py, "board_parser.py", "demo_data/motionboard_backup",
+             "--columns", "demo_data/dr_sum_columns.json", "--out", "demo_data/board_aliases.json"],
+            expect_file="demo_data/board_aliases.json")
+        run([py, "match_aliases.py", "--columns", "demo_data/dr_sum_columns.json",
+             "--aliases", "demo_data/board_aliases.json", "--db", "demo_data/lineage.db"])
+        print("\nデモの結果を見るには: python web_viewer.py --db demo_data/lineage.db")
+        return
 
     if args.stub:
         run([py, "dr_sum_metadata.py", "--stub", "--out", "dr_sum_columns.json"],

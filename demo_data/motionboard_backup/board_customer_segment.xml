@@ -1,0 +1,8 @@
+<Board>
+  <Meta name="顧客セグメント"/>
+  <Item id="seg-item-01">
+    <Field colName="KOKYAKU_CD" alias="顧客コード" table="T_顧客M"/>
+    <Field colName="GYOSHU_CD" alias="業種コード" table="T_顧客M"/>
+    <Field colName="KOKYAKU_NAME" alias="顧客名" table="T_顧客M"/>
+  </Item>
+</Board>

@@ -1,0 +1,8 @@
+{
+  "board": {
+    "boardName": "地域別構成比",
+    "postCalcItems": [
+      {"itemId": "postcalc-001", "itemName": "売上構成比", "expression": "URIAGE_KIN / SUM(URIAGE_KIN) * 100"}
+    ]
+  }
+}

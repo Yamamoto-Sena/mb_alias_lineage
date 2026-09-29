@@ -1,0 +1,5 @@
+<Board name="利益率分析">
+  <Item id="calc-001">
+    <CustomField name="単価換算売上" formula="[URIAGE_KIN]/[TANKA]"/>
+  </Item>
+</Board>

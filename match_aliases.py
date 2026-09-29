@@ -84,10 +84,11 @@ def build_db(db_path: str, columns: list, aliases: list) -> None:
 
         cur.execute(
             """
-            INSERT OR IGNORE INTO aliases (column_id, display_name, board_name, item_id)
-            VALUES (?, ?, ?, ?)
+            INSERT OR IGNORE INTO aliases (column_id, display_name, board_name, item_id, usage_type, source_file)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (column_id, alias["display_name"], alias["board_name"], alias.get("item_id")),
+            (column_id, alias["display_name"], alias["board_name"], alias.get("item_id"),
+             alias.get("usage_type", "alias"), alias.get("source_file")),
         )
 
     conn.commit()
@@ -107,9 +108,9 @@ def report_naming_inconsistencies(db_path: str) -> None:
     cur.execute(
         """
         SELECT c.table_name, c.column_name,
-               COUNT(DISTINCT a.display_name) AS alias_count,
-               GROUP_CONCAT(DISTINCT a.display_name) AS display_names,
-               COUNT(*) AS usage_count
+               COUNT(DISTINCT CASE WHEN a.usage_type='alias' THEN a.display_name END) AS alias_count,
+               GROUP_CONCAT(DISTINCT CASE WHEN a.usage_type='alias' THEN a.display_name END) AS display_names,
+               COUNT(CASE WHEN a.usage_type='alias' THEN 1 END) AS usage_count
         FROM aliases a
         JOIN columns c ON c.id = a.column_id
         GROUP BY c.id
@@ -118,7 +119,14 @@ def report_naming_inconsistencies(db_path: str) -> None:
         """
     )
     rows = cur.fetchall()
+
+    cur.execute("SELECT COUNT(*) FROM aliases WHERE usage_type='calc'")
+    calc_count = cur.fetchone()[0]
     conn.close()
+
+    if calc_count:
+        print(f"※ カスタム項目・事後計算項目の計算式内で使用されている項目: {calc_count}件"
+              f"(表記ゆれの集計には含めていません)\n")
 
     if not rows:
         print("表記ゆれ候補は見つかりませんでした")

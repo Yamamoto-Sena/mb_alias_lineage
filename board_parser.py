@@ -53,6 +53,10 @@ class AliasRecord:
     display_name: str
     board_name: str
     item_id: str
+    source_file: str = ""
+    # "alias"(表示名/エイリアスとして使用) or "calc"(カスタム項目・事後計算項目の
+    # 計算式の中で物理カラムが参照されている)
+    usage_type: str = "alias"
 
 
 # ============================================================
@@ -164,17 +168,57 @@ def _extract_match(index: ColumnIndex, value: str) -> Optional[Tuple[str, Option
 
 
 # ============================================================
+# カスタム項目・事後計算項目の計算式の中で使われている物理カラムの検出
+# ============================================================
+# 値がカラム名と完全一致(または`テーブル名.カラム名`)する場合は上の_extract_matchで
+# 拾えるが、MotionBoardの「カスタム項目」「事後計算項目」は計算式の中に物理カラム名が
+# 部分文字列として埋め込まれる(例: "[URIAGE_KIN]/[TANKA]"、"URIAGE_KIN * 1.1")。
+# これを拾うため、キー名が計算式らしい、または値に演算子・角括弧が含まれる場合に、
+# トークン単位でカラム名を探す。
+FORMULA_KEY_HINTS = ("formula", "expression", "expr", "calc", "算式", "計算式")
+_FORMULA_TOKEN_RE = re.compile(r"[A-Za-z0-9_]+")
+_FORMULA_OPERATOR_RE = re.compile(r"[+*/\[\]()]")  # "-"は日付・ID等の区切りにも多用されるため対象外
+
+
+def _looks_like_formula_key(key: Optional[str]) -> bool:
+    if not key:
+        return False
+    key_lower = key.lower()
+    return any(hint in key_lower for hint in FORMULA_KEY_HINTS)
+
+
+def _looks_like_formula_value(value: str) -> bool:
+    return bool(_FORMULA_OPERATOR_RE.search(value))
+
+
+def _find_columns_in_formula(index: ColumnIndex, value: str) -> List[str]:
+    """計算式らしい文字列の中から、既知の物理カラム名をトークン単位(部分文字列として)で拾う。"""
+    found: List[str] = []
+    seen = set()
+    for token in _FORMULA_TOKEN_RE.findall(value):
+        col = index.match(token)
+        if col and col not in seen:
+            seen.add(col)
+            found.append(col)
+    return found
+
+
+# ============================================================
 # 自動検出モード: XML
 # ============================================================
-def auto_parse_xml(source_name: str, content: bytes, index: ColumnIndex) -> List[AliasRecord]:
+def auto_parse_xml(source_name: str, content: bytes, index: ColumnIndex,
+                    source_file: Optional[str] = None) -> List[AliasRecord]:
     """source_nameは表示・フォールバック用のファイル名(ZIP内のエントリ名でもよい)。
     contentは生バイト列で渡す(ET.fromstringがXML宣言のencoding指定を見て
-    自前でデコードするため、Shift-JIS等で書かれたファイルもそのまま渡せる)。"""
+    自前でデコードするため、Shift-JIS等で書かれたファイルもそのまま渡せる)。
+    source_fileは差分取り込み(--watch)でレコードの出所を追跡するための識別子
+    (省略時はsource_nameを使う)。"""
     try:
         root = _parse_xml_bytes(content)
     except (ET.ParseError, ValueError, LookupError, UnicodeDecodeError):
         return []
 
+    source_file = source_file or source_name
     records: List[AliasRecord] = []
 
     def find_label_on_element(el: ET.Element, matched_key: Optional[str], matched_val: str) -> Optional[str]:
@@ -231,19 +275,36 @@ def auto_parse_xml(source_name: str, content: bytes, index: ColumnIndex) -> List
 
         for attr_key, attr_val in match_sources:
             extracted = _extract_match(index, attr_val)
-            if not extracted:
-                continue
-            col_upper, qualifier = extracted
-            label = find_label_on_element(el, attr_key, attr_val)
-            if label and not index.match(label):  # ラベル候補自体がカラム名そのものなら除外
-                table_name = index.resolve_table(col_upper, list(el.attrib.values()), preferred_table=qualifier)
-                records.append(AliasRecord(
-                    table_name=table_name,
-                    column_name=col_upper,
-                    display_name=label,
-                    board_name=find_ancestor_name(stack),
-                    item_id=find_ancestor_id(stack),
-                ))
+            if extracted:
+                col_upper, qualifier = extracted
+                label = find_label_on_element(el, attr_key, attr_val)
+                if label and not index.match(label):  # ラベル候補自体がカラム名そのものなら除外
+                    table_name = index.resolve_table(col_upper, list(el.attrib.values()), preferred_table=qualifier)
+                    records.append(AliasRecord(
+                        table_name=table_name,
+                        column_name=col_upper,
+                        display_name=label,
+                        board_name=find_ancestor_name(stack),
+                        item_id=find_ancestor_id(stack),
+                        source_file=source_file,
+                    ))
+            elif _looks_like_formula_key(attr_key) or _looks_like_formula_value(attr_val):
+                # 完全一致はしないが、計算式らしい値の中に物理カラム名が
+                # 部分文字列として埋め込まれていないか調べる(カスタム項目・事後計算項目対策)
+                cols_in_formula = _find_columns_in_formula(index, attr_val)
+                if cols_in_formula:
+                    calc_name = find_label_on_element(el, attr_key, attr_val) or attr_val
+                    for col_upper in cols_in_formula:
+                        table_name = index.resolve_table(col_upper, list(el.attrib.values()))
+                        records.append(AliasRecord(
+                            table_name=table_name,
+                            column_name=col_upper,
+                            display_name=calc_name,
+                            board_name=find_ancestor_name(stack),
+                            item_id=find_ancestor_id(stack),
+                            source_file=source_file,
+                            usage_type="calc",
+                        ))
         for child in el:
             walk(child, stack)
         stack.pop()
@@ -255,13 +316,17 @@ def auto_parse_xml(source_name: str, content: bytes, index: ColumnIndex) -> List
 # ============================================================
 # 自動検出モード: JSON
 # ============================================================
-def auto_parse_json(source_name: str, content: bytes, index: ColumnIndex) -> List[AliasRecord]:
-    """source_nameは表示・フォールバック用のファイル名(ZIP内のエントリ名でもよい)。"""
+def auto_parse_json(source_name: str, content: bytes, index: ColumnIndex,
+                     source_file: Optional[str] = None) -> List[AliasRecord]:
+    """source_nameは表示・フォールバック用のファイル名(ZIP内のエントリ名でもよい)。
+    source_fileは差分取り込み(--watch)でレコードの出所を追跡するための識別子
+    (省略時はsource_nameを使う)。"""
     try:
         data = json.loads(content.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError):
         return []
 
+    source_file = source_file or source_name
     records: List[AliasRecord] = []
 
     def find_label_in_dict(node: dict, matched_key, matched_val: str) -> Optional[str]:
@@ -313,6 +378,7 @@ def auto_parse_json(source_name: str, content: bytes, index: ColumnIndex) -> Lis
                         display_name=label_val,
                         board_name=find_ancestor_name(dict_stack),
                         item_id=find_ancestor_id(dict_stack),
+                        source_file=source_file,
                     ))
 
     def _try_linked_lookup_tables(node: dict, dict_stack: List[dict]) -> None:
@@ -340,6 +406,7 @@ def auto_parse_json(source_name: str, content: bytes, index: ColumnIndex) -> Lis
                                 display_name=label_val,
                                 board_name=find_ancestor_name(dict_stack),
                                 item_id=str(item_key),
+                                source_file=source_file,
                             ))
 
     def walk(node, dict_stack: List[dict]) -> None:
@@ -360,7 +427,26 @@ def auto_parse_json(source_name: str, content: bytes, index: ColumnIndex) -> Lis
                                 display_name=label,
                                 board_name=find_ancestor_name(new_stack),
                                 item_id=find_ancestor_id(new_stack),
+                                source_file=source_file,
                             ))
+                    elif _looks_like_formula_key(k) or _looks_like_formula_value(v):
+                        # 完全一致はしないが、計算式らしい値の中に物理カラム名が
+                        # 部分文字列として埋め込まれていないか調べる(カスタム項目・事後計算項目対策)
+                        cols_in_formula = _find_columns_in_formula(index, v)
+                        if cols_in_formula:
+                            calc_name = find_label_in_dict(node, k, v) or v
+                            context_values = [x for x in node.values() if isinstance(x, str)]
+                            for col_upper in cols_in_formula:
+                                table_name = index.resolve_table(col_upper, context_values)
+                                records.append(AliasRecord(
+                                    table_name=table_name,
+                                    column_name=col_upper,
+                                    display_name=calc_name,
+                                    board_name=find_ancestor_name(new_stack),
+                                    item_id=find_ancestor_id(new_stack),
+                                    source_file=source_file,
+                                    usage_type="calc",
+                                ))
             _try_parallel_arrays(node, new_stack)
             _try_linked_lookup_tables(node, new_stack)
             for v in node.values():
@@ -373,9 +459,11 @@ def auto_parse_json(source_name: str, content: bytes, index: ColumnIndex) -> Lis
     return records
 
 
-def _auto_parse_zip(zip_path: Path, index: ColumnIndex) -> List[AliasRecord]:
+def _auto_parse_zip(zip_path: Path, index: ColumnIndex,
+                     source_file: Optional[str] = None) -> List[AliasRecord]:
     """ZIP内のXML/JSONエントリを、展開せずメモリ上で直接解析する。"""
     records: List[AliasRecord] = []
+    zip_source_file = source_file or zip_path.name
     try:
         zf = zipfile.ZipFile(zip_path)
     except zipfile.BadZipFile:
@@ -387,10 +475,11 @@ def _auto_parse_zip(zip_path: Path, index: ColumnIndex) -> List[AliasRecord]:
             if name.endswith("/"):
                 continue
             label = f"{zip_path.name}:{name}"
+            entry_source_file = f"{zip_source_file}:{name}"
             if name.lower().endswith(".xml"):
-                recs = auto_parse_xml(name, zf.read(name), index)
+                recs = auto_parse_xml(name, zf.read(name), index, source_file=entry_source_file)
             elif name.lower().endswith(".json"):
-                recs = auto_parse_json(name, zf.read(name), index)
+                recs = auto_parse_json(name, zf.read(name), index, source_file=entry_source_file)
             else:
                 continue
             if recs:
@@ -410,25 +499,108 @@ def auto_parse_all(root_dir: Path, columns_path: str) -> List[AliasRecord]:
     print(f"XML {len(xml_files)}件 / JSON {len(json_files)}件 / ZIP {len(zip_files)}件を自動検出モードで走査します")
 
     for path in xml_files:
-        recs = auto_parse_xml(path.name, path.read_bytes(), index)
+        recs = auto_parse_xml(path.name, path.read_bytes(), index, source_file=str(path.relative_to(root_dir)))
         if recs:
             print(f"  検出: {path.name} → {len(recs)}件")
         all_records.extend(recs)
 
     for path in json_files:
-        recs = auto_parse_json(path.name, path.read_bytes(), index)
+        recs = auto_parse_json(path.name, path.read_bytes(), index, source_file=str(path.relative_to(root_dir)))
         if recs:
             print(f"  検出: {path.name} → {len(recs)}件")
         all_records.extend(recs)
 
     for zip_path in zip_files:
-        all_records.extend(_auto_parse_zip(zip_path, index))
+        all_records.extend(_auto_parse_zip(zip_path, index, source_file=str(zip_path.relative_to(root_dir))))
 
     if not all_records:
         print("  ※1件も検出できませんでした。暗号化/独自バイナリ形式の可能性があります。")
         print("    inspect_file.py で中身を確認し、必要なら --manual を検討してください")
 
     return all_records
+
+
+# ============================================================
+# 差分取り込み(--watch): MotionBoardのバッチ等が定義ファイルを随時吐き出す
+# フォルダを、タスクスケジューラ等で定期的にこのモードにかけることで、
+# 毎回フォルダ全体を読み直さずに新規/更新/削除ファイルだけを取り込む。
+# ============================================================
+WATCH_TARGET_SUFFIXES = (".xml", ".json", ".zip")
+
+
+def _record_root_file(source_file: Optional[str]) -> str:
+    """ZIP内エントリのsource_file("zip名:entry名")から、差分判定の単位となる
+    実ファイル(ZIP自体)のパスだけを取り出す(ZIPが変わればエントリごと全部作り直す)。"""
+    return (source_file or "").split(":", 1)[0]
+
+
+def _scan_source_files(root_dir: Path) -> Dict[str, dict]:
+    """root_dir以下のXML/JSON/ZIPファイルの一覧を、差分検出用の指紋(mtime+size)付きで返す。
+    ファイル内容までは見ない軽量な指紋なので、mtimeが変わらない改変は検知できない点に注意。"""
+    fingerprints: Dict[str, dict] = {}
+    for path in root_dir.rglob("*"):
+        if path.is_file() and path.suffix.lower() in WATCH_TARGET_SUFFIXES:
+            rel = str(path.relative_to(root_dir))
+            stat = path.stat()
+            fingerprints[rel] = {"mtime": stat.st_mtime, "size": stat.st_size}
+    return fingerprints
+
+
+def _parse_one_file(path: Path, rel: str, index: ColumnIndex) -> List[AliasRecord]:
+    suffix = path.suffix.lower()
+    if suffix == ".xml":
+        return auto_parse_xml(path.name, path.read_bytes(), index, source_file=rel)
+    if suffix == ".json":
+        return auto_parse_json(path.name, path.read_bytes(), index, source_file=rel)
+    if suffix == ".zip":
+        return _auto_parse_zip(path, index, source_file=rel)
+    return []
+
+
+def incremental_parse(root_dir: Path, columns_path: str, out_path: Path,
+                       state_path: Optional[Path] = None) -> Tuple[List[dict], dict]:
+    """前回実行時からの新規/更新/削除ファイルだけを差分処理し、既存の--out(board_aliases.json)と
+    マージする。差分判定はファイルパス+mtime+sizeの指紋比較による(内容のハッシュまでは見ない)。
+    戻り値は (マージ後の全レコード(dictのリスト), 差分件数のサマリー)。
+    """
+    state_path = state_path or Path(str(out_path) + ".watch_state.json")
+    old_state: Dict[str, dict] = {}
+    if state_path.exists():
+        old_state = json.loads(state_path.read_text(encoding="utf-8"))
+
+    columns = json.loads(Path(columns_path).read_text(encoding="utf-8"))
+    index = ColumnIndex(columns)
+
+    current_state = _scan_source_files(root_dir)
+    changed = sorted(rel for rel, fp in current_state.items() if old_state.get(rel) != fp)
+    removed = sorted(rel for rel in old_state if rel not in current_state)
+
+    existing_records: List[dict] = []
+    if out_path.exists():
+        existing_records = json.loads(out_path.read_text(encoding="utf-8"))
+
+    stale_files = set(changed) | set(removed)
+    kept_records = [r for r in existing_records
+                     if _record_root_file(r.get("source_file")) not in stale_files]
+
+    new_records: List[AliasRecord] = []
+    for rel in changed:
+        recs = _parse_one_file(root_dir / rel, rel, index)
+        if recs:
+            print(f"  検出: {rel} → {len(recs)}件")
+        new_records.extend(recs)
+
+    merged = kept_records + [asdict(r) for r in new_records]
+
+    state_path.write_text(json.dumps(current_state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    summary = {
+        "changed": len(changed),
+        "removed": len(removed),
+        "unchanged": len(current_state) - len(changed),
+        "total_records": len(merged),
+    }
+    return merged, summary
 
 
 # ============================================================
@@ -454,6 +626,7 @@ def manual_parse_file(path: Path) -> List[AliasRecord]:
                 records.append(AliasRecord(
                     table_name=table, column_name=column,
                     display_name=label, board_name=board_name, item_id=item_id,
+                    source_file=path.name,
                 ))
     return records
 
@@ -475,7 +648,7 @@ def stub_records() -> List[AliasRecord]:
         ("T_売上明細", "CHIIKI_KBN", "Region", "海外向けサマリー", "item045"),
         ("T_在庫", "ZAIKO_SU", "在庫数", "在庫アラート", "item050"),
     ]
-    return [AliasRecord(table_name=t, column_name=c, display_name=d, board_name=b, item_id=i)
+    return [AliasRecord(table_name=t, column_name=c, display_name=d, board_name=b, item_id=i, source_file="stub")
             for t, c, d, b, i in sample]
 
 
@@ -486,7 +659,24 @@ def main() -> None:
     parser.add_argument("--manual", action="store_true", help="TAG_CONFIGによる手動モードを使う")
     parser.add_argument("--out", default="board_aliases.json")
     parser.add_argument("--stub", action="store_true", help="ダミーデータで動作確認する")
+    parser.add_argument("--watch", action="store_true",
+                         help="前回実行からの新規/更新/削除ファイルだけを差分処理し、既存の--outと"
+                              "マージする(タスクスケジューラ等で定期実行し、MotionBoardのバッチ出力を"
+                              "随時取り込む運用向け)")
+    parser.add_argument("--watch-state", help="差分検出用の状態ファイル(--watch時。既定値: <out>.watch_state.json)")
     args = parser.parse_args()
+
+    if args.watch:
+        if not (args.root_dir and args.columns):
+            parser.error("--watch には フォルダパス と --columns dr_sum_columns.json が必須です")
+        out_path = Path(args.out)
+        state_path = Path(args.watch_state) if args.watch_state else None
+        merged, summary = incremental_parse(Path(args.root_dir), args.columns, out_path, state_path)
+        out_path.write_text(json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"\n差分検出: 新規/更新 {summary['changed']}件 / 削除 {summary['removed']}件 / "
+              f"変更なし {summary['unchanged']}件(スキップ)")
+        print(f"{summary['total_records']}件のエイリアスレコード(マージ後の合計)を {out_path} に出力しました")
+        return
 
     if args.stub:
         records = stub_records()

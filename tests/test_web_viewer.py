@@ -3,12 +3,14 @@ import sqlite3
 import web_viewer as wv
 
 
-def _make_db(tmp_path, rows):
+def _make_db(tmp_path, rows, calc_aliases=None):
+    """rows: [(col_id, table_name, column_name, [(display_name, board_name), ...])]
+    calc_aliases (省略可): [(col_id, display_name, board_name)] usage_type='calc'で登録する。"""
     db_path = tmp_path / "lineage.db"
     conn = sqlite3.connect(db_path)
     conn.executescript("""
         CREATE TABLE columns (id INTEGER PRIMARY KEY, table_name TEXT, table_type TEXT, column_name TEXT, data_type TEXT);
-        CREATE TABLE aliases (id INTEGER PRIMARY KEY, column_id INTEGER, display_name TEXT, board_name TEXT, item_id TEXT);
+        CREATE TABLE aliases (id INTEGER PRIMARY KEY, column_id INTEGER, display_name TEXT, board_name TEXT, item_id TEXT, usage_type TEXT DEFAULT 'alias');
     """)
     for col_id, table_name, column_name, aliases in rows:
         conn.execute(
@@ -17,9 +19,14 @@ def _make_db(tmp_path, rows):
         )
         for display_name, board_name in aliases:
             conn.execute(
-                "INSERT INTO aliases (column_id, display_name, board_name, item_id) VALUES (?,?,?,?)",
+                "INSERT INTO aliases (column_id, display_name, board_name, item_id, usage_type) VALUES (?,?,?,?,'alias')",
                 (col_id, display_name, board_name, "item1"),
             )
+    for col_id, display_name, board_name in (calc_aliases or []):
+        conn.execute(
+            "INSERT INTO aliases (column_id, display_name, board_name, item_id, usage_type) VALUES (?,?,?,?,'calc')",
+            (col_id, display_name, board_name, "item1"),
+        )
     conn.commit()
     conn.close()
     return str(db_path)
@@ -49,8 +56,23 @@ def test_fetch_data_no_aliases(tmp_path):
     db_path = _make_db(tmp_path, [(1, "T_A", "COL1", [])])
     result = wv.fetch_data(db_path)
     assert result[0]["display_names"] == []
+    assert result[0]["calc_names"] == []
     assert result[0]["alias_count"] == 0
     assert result[0]["usage_count"] == 0
+
+
+def test_fetch_data_calc_usage_is_separated_from_aliases(tmp_path):
+    db_path = _make_db(
+        tmp_path,
+        [(1, "T_A", "COL1", [("表示A", "board1")])],
+        calc_aliases=[(1, "利益率", "board3")],
+    )
+    result = wv.fetch_data(db_path)
+    row = result[0]
+    assert row["display_names"] == ["表示A"]
+    assert row["calc_names"] == ["利益率"]
+    assert row["alias_count"] == 1  # calc側は表記ゆれ集計に含めない
+    assert row["usage_count"] == 2  # 使用件数(延べ)には両方カウントされる
 
 
 def test_warn_if_large_below_threshold_is_silent(capsys):

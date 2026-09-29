@@ -27,11 +27,11 @@ def find(records, board_name, item_id, column_name):
 
 class TestAutoParseAllTotals:
     def test_total_record_count(self):
-        assert len(all_records()) == 38
+        assert len(all_records()) == 41
 
     def test_sample_data_file_count(self):
-        assert len(list(BACKUP_DIR.glob("*.xml"))) == 11
-        assert len(list(BACKUP_DIR.glob("*.json"))) == 3
+        assert len(list(BACKUP_DIR.glob("*.xml"))) == 12
+        assert len(list(BACKUP_DIR.glob("*.json"))) == 4
         assert len(list(BACKUP_DIR.glob("*.zip"))) == 1
 
 
@@ -98,6 +98,162 @@ class TestPreExistingBugFix:
         # <Meta name="..."/> が兄弟要素にある構造。修正前はファイル名にフォールバックしていた。
         r = find(all_records(), "顧客セグメント", "seg-item-01", "KOKYAKU_CD")
         assert r.display_name == "顧客コード"
+
+
+class TestCalcFieldDetection:
+    """カスタム項目・事後計算項目の計算式の中で使われている物理カラムの検出。
+    エイリアスとして完全一致するわけではないので、usage_type='calc'で区別される。"""
+
+    def test_custom_field_formula_xml(self):
+        records = all_records()
+        matches = [r for r in records
+                   if r.board_name == "利益率分析" and r.item_id == "calc-001"
+                   and r.usage_type == "calc"]
+        columns_found = {r.column_name for r in matches}
+        assert columns_found == {"URIAGE_KIN", "TANKA"}
+        for r in matches:
+            assert r.display_name == "単価換算売上"
+            assert r.source_file == "board_custom_calc_field.xml"
+
+    def test_post_calc_item_expression_json(self):
+        r = find(all_records(), "地域別構成比", "postcalc-001", "URIAGE_KIN")
+        assert r.usage_type == "calc"
+        assert r.display_name == "売上構成比"
+        assert r.source_file == "board_post_calc_item.json"
+
+    def test_calc_records_do_not_pollute_ordinary_aliases(self):
+        # 通常のエイリアス(usage_type='alias')の件数は今回の追加で変化しないはず
+        alias_records = [r for r in all_records() if r.usage_type == "alias"]
+        assert len(alias_records) == 38
+
+
+class TestFormulaHeuristicHelpers:
+    def test_looks_like_formula_key(self):
+        assert bp._looks_like_formula_key("formula") is True
+        assert bp._looks_like_formula_key("expression") is True
+        assert bp._looks_like_formula_key("calcType") is True
+        assert bp._looks_like_formula_key("name") is False
+        assert bp._looks_like_formula_key(None) is False
+
+    def test_looks_like_formula_value(self):
+        assert bp._looks_like_formula_value("[URIAGE_KIN]/[TANKA]") is True
+        assert bp._looks_like_formula_value("URIAGE_KIN * 1.1") is True
+        assert bp._looks_like_formula_value("SUM(URIAGE_KIN)") is True
+        # ハイフンだけ(IDや日付でありがち)では計算式とは判定しない
+        assert bp._looks_like_formula_value("item-001") is False
+        assert bp._looks_like_formula_value("単価換算売上") is False
+
+    def test_find_columns_in_formula(self):
+        index = load_index()
+        found = bp._find_columns_in_formula(index, "[URIAGE_KIN]/[TANKA]")
+        assert found == ["URIAGE_KIN", "TANKA"]
+
+    def test_find_columns_in_formula_dedupes(self):
+        index = load_index()
+        found = bp._find_columns_in_formula(index, "URIAGE_KIN / SUM(URIAGE_KIN) * 100")
+        assert found == ["URIAGE_KIN"]
+
+    def test_find_columns_in_formula_no_match(self):
+        index = load_index()
+        assert bp._find_columns_in_formula(index, "1 + 1") == []
+
+    def test_record_root_file_strips_zip_entry(self):
+        assert bp._record_root_file("backup.zip:entry.xml") == "backup.zip"
+        assert bp._record_root_file("plain.xml") == "plain.xml"
+        assert bp._record_root_file(None) == ""
+
+
+class TestIncrementalParse:
+    """--watch (差分取り込み)の挙動。ファイルの追加/変更/削除に応じて
+    board_aliases.json をマージ更新し、変わっていないファイルは再処理しない。"""
+
+    def _write(self, path, content):
+        path.write_text(content, encoding="utf-8")
+
+    def test_first_run_parses_everything(self, tmp_path):
+        root = tmp_path / "backup"
+        root.mkdir()
+        self._write(root / "a.xml", '<Board name="A"><Item id="1">'
+                                     '<Field column="URIAGE_KIN" label="売上"/></Item></Board>')
+        columns_path = tmp_path / "columns.json"
+        columns_path.write_text(json.dumps([{"table_name": "T_売上明細", "table_type": "TABLE",
+                                              "column_name": "URIAGE_KIN", "data_type": "DECIMAL", "ordinal": 1}]),
+                                 encoding="utf-8")
+        out_path = tmp_path / "board_aliases.json"
+
+        merged, summary = bp.incremental_parse(root, str(columns_path), out_path)
+
+        assert summary == {"changed": 1, "removed": 0, "unchanged": 0, "total_records": 1}
+        assert merged[0]["column_name"] == "URIAGE_KIN"
+        assert (tmp_path / "board_aliases.json.watch_state.json").exists()
+
+    def test_second_run_skips_unchanged_file(self, tmp_path, capsys):
+        root = tmp_path / "backup"
+        root.mkdir()
+        self._write(root / "a.xml", '<Board name="A"><Item id="1">'
+                                     '<Field column="URIAGE_KIN" label="売上"/></Item></Board>')
+        columns_path = tmp_path / "columns.json"
+        columns_path.write_text(json.dumps([{"table_name": "T_売上明細", "table_type": "TABLE",
+                                              "column_name": "URIAGE_KIN", "data_type": "DECIMAL", "ordinal": 1}]),
+                                 encoding="utf-8")
+        out_path = tmp_path / "board_aliases.json"
+
+        merged1, _ = bp.incremental_parse(root, str(columns_path), out_path)
+        out_path.write_text(json.dumps(merged1, ensure_ascii=False), encoding="utf-8")
+
+        capsys.readouterr()
+        merged2, summary2 = bp.incremental_parse(root, str(columns_path), out_path)
+        assert summary2 == {"changed": 0, "removed": 0, "unchanged": 1, "total_records": 1}
+        assert merged2 == merged1
+        assert "検出:" not in capsys.readouterr().out
+
+    def test_changed_file_is_reparsed_and_old_records_replaced(self, tmp_path):
+        root = tmp_path / "backup"
+        root.mkdir()
+        file_a = root / "a.xml"
+        self._write(file_a, '<Board name="A"><Item id="1">'
+                             '<Field column="URIAGE_KIN" label="売上"/></Item></Board>')
+        columns_path = tmp_path / "columns.json"
+        columns_path.write_text(json.dumps([{"table_name": "T_売上明細", "table_type": "TABLE",
+                                              "column_name": "URIAGE_KIN", "data_type": "DECIMAL", "ordinal": 1}]),
+                                 encoding="utf-8")
+        out_path = tmp_path / "board_aliases.json"
+
+        merged1, _ = bp.incremental_parse(root, str(columns_path), out_path)
+        out_path.write_text(json.dumps(merged1, ensure_ascii=False), encoding="utf-8")
+
+        # 表示名を変更し、mtimeも確実に更新されるようずらす
+        import os
+        import time
+        time.sleep(0.01)
+        self._write(file_a, '<Board name="A"><Item id="1">'
+                             '<Field column="URIAGE_KIN" label="売上高"/></Item></Board>')
+        os.utime(file_a, None)
+
+        merged2, summary2 = bp.incremental_parse(root, str(columns_path), out_path)
+        assert summary2["changed"] == 1
+        assert len(merged2) == 1
+        assert merged2[0]["display_name"] == "売上高"
+
+    def test_removed_file_drops_its_records(self, tmp_path):
+        root = tmp_path / "backup"
+        root.mkdir()
+        file_a = root / "a.xml"
+        self._write(file_a, '<Board name="A"><Item id="1">'
+                             '<Field column="URIAGE_KIN" label="売上"/></Item></Board>')
+        columns_path = tmp_path / "columns.json"
+        columns_path.write_text(json.dumps([{"table_name": "T_売上明細", "table_type": "TABLE",
+                                              "column_name": "URIAGE_KIN", "data_type": "DECIMAL", "ordinal": 1}]),
+                                 encoding="utf-8")
+        out_path = tmp_path / "board_aliases.json"
+
+        merged1, _ = bp.incremental_parse(root, str(columns_path), out_path)
+        out_path.write_text(json.dumps(merged1, ensure_ascii=False), encoding="utf-8")
+
+        file_a.unlink()
+        merged2, summary2 = bp.incremental_parse(root, str(columns_path), out_path)
+        assert summary2["removed"] == 1
+        assert merged2 == []
 
 
 class TestColumnIndex:

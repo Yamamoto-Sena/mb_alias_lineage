@@ -23,8 +23,12 @@ CREATE TABLE aliases (
     display_name TEXT NOT NULL,
     board_name TEXT NOT NULL,
     item_id TEXT,
+    -- "alias"(表示名/エイリアスとして使用) or "calc"(カスタム項目・事後計算項目の
+    -- 計算式の中で物理カラムが参照されている)
+    usage_type TEXT NOT NULL DEFAULT 'alias',
+    source_file TEXT,
     FOREIGN KEY (column_id) REFERENCES columns(id),
-    UNIQUE(column_id, display_name, board_name, item_id)
+    UNIQUE(column_id, display_name, board_name, item_id, usage_type)
 );
 
 CREATE INDEX idx_aliases_column_id ON aliases(column_id);

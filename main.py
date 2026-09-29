@@ -11,6 +11,14 @@
     python main.py --backup-dir /path/to/backup/data \
         --host drsumserver --db mydb --user analyst --jdbc-jar /path/to/dwodsjd4.jar
 
+使い方（MotionBoardのバッチ出力フォルダを継続的に自動取り込みしたい場合）:
+    上と同じコマンドに --watch を付けてタスクスケジューラ等で定期実行すると、
+    毎回フォルダ全体を読み直さず、前回実行からの新規/更新/削除ファイルだけを
+    差分取り込みする(Dr.Sum側は元々JDBC経由でサーバーから直接取得するため、
+    こちらも同じ間隔で定期実行すれば手動でのファイル取得は不要になる):
+    python main.py --backup-dir /path/to/backup/data --watch \
+        --host drsumserver --db mydb --user analyst --jdbc-jar /path/to/dwodsjd4.jar
+
 使い方（動作確認だけしたい場合）:
     python main.py --stub
 
@@ -45,6 +53,10 @@ def main() -> None:
     parser.add_argument("--demo", action="store_true",
                          help="demo_data/ の合成データで一気通貫のデモを再現する(社内説明用)")
     parser.add_argument("--backup-dir", help="MotionBoardのボード定義バックアップフォルダ")
+    parser.add_argument("--watch", action="store_true",
+                         help="--backup-dirを差分監視し、新規/更新/削除ファイルのみ取り込む"
+                              "(タスクスケジューラ等でこのコマンドを定期実行し、MotionBoardの"
+                              "バッチ出力を随時取り込む運用向け)")
     parser.add_argument("--host")
     parser.add_argument("--db")
     parser.add_argument("--user")
@@ -75,9 +87,11 @@ def main() -> None:
             expect_file="dr_sum_columns.json")
         # 自動検出モード: Dr.Sumのカラム一覧を手がかりにタグ構造を推測するので、
         # ボード定義ファイルのタグ名を事前に調べる必要はない
-        run([py, "board_parser.py", args.backup_dir,
-             "--columns", "dr_sum_columns.json", "--out", "board_aliases.json"],
-            expect_file="board_aliases.json")
+        board_parser_cmd = [py, "board_parser.py", args.backup_dir,
+                             "--columns", "dr_sum_columns.json", "--out", "board_aliases.json"]
+        if args.watch:
+            board_parser_cmd.append("--watch")
+        run(board_parser_cmd, expect_file="board_aliases.json")
 
     run([py, "match_aliases.py", "--columns", "dr_sum_columns.json", "--aliases", "board_aliases.json"])
 

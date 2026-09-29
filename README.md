@@ -55,9 +55,10 @@ python match_aliases.py --columns sample_data/dr_sum_columns.json --aliases boar
 JSON形式、というように、あえてタグ名も属性名も全て違う書き方にしてあり、
 自動検出モードがどんな構造でも同じように動くことを確認できます。
 
-実行すると38件のエイリアスが検出され、表記ゆれ候補が4件
-（例: `URIAGE_KIN`が「売上金額」「Revenue」「売上」の3通りで
-使われている、など）見つかるはずです。
+実行すると41件のレコード(表示名としてのエイリアス38件＋カスタム項目・事後計算項目の
+計算式内での使用3件)が検出され、表記ゆれ候補が4件（例: `URIAGE_KIN`が「売上金額」
+「Revenue」「売上」の3通りで使われている、など）見つかるはずです。計算式内での
+使用はエイリアスの表記ゆれ集計には含まれません。
 
 `sample_data/motionboard_backup/`内のXML/JSONファイルを開いて中身を
 見てもらうと、実際のボード定義がどんな見た目になり得るかのイメージにも
@@ -86,6 +87,13 @@ JSON形式、というように、あえてタグ名も属性名も全て違う�
 - `board_zipped_backup.zip` … ZIP圧縮されたボード定義(中に`board_in_zip.xml`を含む)。展開せずメモリ上で直接解析する
 - `board_namespaced.xml` … `<mb:Field mb:column="..." mb:label="..."/>`のようなXML名前空間プレフィックス付き
 - `board_sjis_encoded.xml` … `<?xml version="1.0" encoding="Shift_JIS"?>`宣言のファイル。**修正前はPython標準のXMLパーサーがこの宣言を直接デコードできず例外で処理全体が止まっていた**(`board_parser.py`の`_parse_xml_bytes`で回避)
+
+さらに以下の2ファイルは、カスタム項目・事後計算項目の計算式の中で使われている
+物理カラムの検出（表示名としての完全一致ではなく、計算式の一部として部分文字列で
+出現するケース）を確認するためのサンプルです。
+
+- `board_custom_calc_field.xml` … `<CustomField formula="[URIAGE_KIN]/[TANKA]"/>`のように、計算式の中に複数の物理カラムが角括弧付きで埋め込まれている
+- `board_post_calc_item.json` … `{"expression": "URIAGE_KIN / SUM(URIAGE_KIN) * 100"}`のように、事後計算項目(集計後の構成比計算等)の計算式に物理カラムが埋め込まれている
 
 ## 使い方（実物のファイルが手に入ったら）
 
@@ -118,6 +126,15 @@ Shift-JIS文字コード宣言のファイルにも対応しています。
 検証として、タグ名も属性名もまったく違う2種類のサンプル
 （`label`属性を使うものと`caption`属性を使うもの）で試したところ、
 どちらも正しく検出できることを確認済みです。
+
+**表示名（エイリアス）だけでなく、カスタム項目・事後計算項目の計算式の中で
+使われている物理カラムも検知します。** `formula`/`expression`など計算式らしい
+キー名を持つ値や、`[URIAGE_KIN]/[TANKA]`のように演算子・角括弧を含む値の中から、
+既知の物理カラム名をトークン単位（部分文字列として）で拾います。この使われ方は
+表記ゆれの候補には数えず（`usage_type`が`alias`ではなく`calc`として区別され）、
+ビューア上では別バッジで「カスタム項目/計算式で使用」として表示されます。
+検出精度を調整したい場合は`board_parser.py`内の`FORMULA_KEY_HINTS`
+（計算式らしいキー名のヒント）を実際のキー名の傾向に合わせて調整してください。
 
 ### ステップ3: 突き合わせて表記ゆれを検出する
 
@@ -154,6 +171,32 @@ python export_static.py
 
 ```bash
 python main.py --backup-dir path/to/backup/data/ --host <server> --db <dbname> --user <user> --jdbc-jar <jarのパス>
+```
+
+### 定義ファイルの取得・取り込みを自動化する（手動取得をやめたい場合）
+
+- **Dr.Sum側**: `dr_sum_metadata.py`はJDBC経由でサーバーから直接カラム一覧を取得するので、
+  そもそも手動でのファイルエクスポートは不要です。あとはこのコマンドをタスクスケジューラ等で
+  定期実行するだけで、常に最新のカラム一覧が使われます。
+- **MotionBoard側**: バックアップフォルダに`--watch`を付けて実行すると、前回実行からの
+  新規/更新/削除ファイルだけを差分処理し、既存の`board_aliases.json`とマージします。
+  MotionBoardのバッチ機能などが定義ファイルを随時吐き出すフォルダをそのまま指定し、
+  このコマンドをタスクスケジューラ等で定期実行することで、都度のファイル取得・実行を
+  手動で行う必要がなくなります。
+
+```bash
+python main.py --backup-dir path/to/backup/data/ --watch \
+    --host <server> --db <dbname> --user <user> --jdbc-jar <jarのパス>
+```
+
+差分検出はファイルパス＋更新日時＋サイズによる簡易的な指紋比較です（内容のハッシュまでは
+見ません）。差分検出用の状態は`board_aliases.json.watch_state.json`のような名前で
+保存されます（`board_parser.py --watch-state`で明示的に指定することも可能です）。
+`board_parser.py`単体で使う場合は以下のようになります。
+
+```bash
+python board_parser.py path/to/backup/data/ --columns dr_sum_columns.json \
+    --out board_aliases.json --watch
 ```
 
 ### 動作確認だけしたい場合（ダミーデータ）
@@ -201,4 +244,8 @@ python board_parser.py path/to/backup/data/ --manual --out board_aliases.json
 - `board_parser.py` の自動検出精度: 実ファイルで試して、誤検出が多ければ
   `_looks_like_label_key` 等のヒント文字列(`LABEL_KEY_HINTS`など)を
   実際のキー名の傾向に合わせて調整するとさらに精度が上がる
+- `board_parser.py` のカスタム項目・事後計算項目の計算式検出精度: 実ファイルの
+  キー名の傾向に合わせて`FORMULA_KEY_HINTS`を調整する。計算式の演算子ヒント
+  (`_FORMULA_OPERATOR_RE`)も、実際の計算式の書き方（角括弧を使わない等）に
+  応じて見直すとよい
 - `db_schema.sql`: 実データを見て型やインデックスを調整

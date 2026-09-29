@@ -8,13 +8,13 @@ def _make_db(tmp_path):
     conn = sqlite3.connect(db_path)
     conn.executescript("""
         CREATE TABLE columns (id INTEGER PRIMARY KEY, table_name TEXT, table_type TEXT, column_name TEXT, data_type TEXT);
-        CREATE TABLE aliases (id INTEGER PRIMARY KEY, column_id INTEGER, display_name TEXT, board_name TEXT, item_id TEXT);
+        CREATE TABLE aliases (id INTEGER PRIMARY KEY, column_id INTEGER, display_name TEXT, board_name TEXT, item_id TEXT, usage_type TEXT DEFAULT 'alias');
     """)
     conn.execute(
         "INSERT INTO columns (id, table_name, table_type, column_name, data_type) VALUES (1,'T_A','TABLE','COL1','VARCHAR')"
     )
     conn.execute(
-        "INSERT INTO aliases (column_id, display_name, board_name, item_id) VALUES (1,'表示A','board1','item1')"
+        "INSERT INTO aliases (column_id, display_name, board_name, item_id, usage_type) VALUES (1,'表示A','board1','item1','alias')"
     )
     conn.commit()
     conn.close()
@@ -40,14 +40,14 @@ def test_build_static_html_escapes_script_close_tag_in_display_name(tmp_path):
     conn = sqlite3.connect(db_path)
     conn.executescript("""
         CREATE TABLE columns (id INTEGER PRIMARY KEY, table_name TEXT, table_type TEXT, column_name TEXT, data_type TEXT);
-        CREATE TABLE aliases (id INTEGER PRIMARY KEY, column_id INTEGER, display_name TEXT, board_name TEXT, item_id TEXT);
+        CREATE TABLE aliases (id INTEGER PRIMARY KEY, column_id INTEGER, display_name TEXT, board_name TEXT, item_id TEXT, usage_type TEXT DEFAULT 'alias');
     """)
     conn.execute(
         "INSERT INTO columns (id, table_name, table_type, column_name, data_type) VALUES (1,'T_A','TABLE','COL1','VARCHAR')"
     )
     conn.execute(
-        "INSERT INTO aliases (column_id, display_name, board_name, item_id) VALUES "
-        "(1,'</script><script>alert(1)</script>','board1','item1')"
+        "INSERT INTO aliases (column_id, display_name, board_name, item_id, usage_type) VALUES "
+        "(1,'</script><script>alert(1)</script>','board1','item1','alias')"
     )
     conn.commit()
     conn.close()

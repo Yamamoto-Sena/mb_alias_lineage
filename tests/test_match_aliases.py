@@ -74,6 +74,52 @@ def test_build_db_rerun_is_idempotent(tmp_path):
     assert column_count == 1
 
 
+def test_build_db_stores_usage_type_and_source_file(tmp_path):
+    db_path = tmp_path / "lineage.db"
+    aliases = [
+        {"table_name": "T_A", "column_name": "COL1", "display_name": "利益率", "board_name": "board1",
+         "item_id": "i1", "usage_type": "calc", "source_file": "board1.xml"},
+    ]
+    ma.build_db(str(db_path), COLUMNS, aliases)
+
+    conn = sqlite3.connect(db_path)
+    row = conn.execute("SELECT usage_type, source_file FROM aliases").fetchone()
+    conn.close()
+    assert row == ("calc", "board1.xml")
+
+
+def test_build_db_defaults_usage_type_to_alias_when_absent(tmp_path):
+    # 既存呼び出し(usage_type/source_fileキー無し)との後方互換性
+    db_path = tmp_path / "lineage.db"
+    aliases = [
+        {"table_name": "T_A", "column_name": "COL1", "display_name": "表示A", "board_name": "board1", "item_id": "i1"},
+    ]
+    ma.build_db(str(db_path), COLUMNS, aliases)
+
+    conn = sqlite3.connect(db_path)
+    row = conn.execute("SELECT usage_type FROM aliases").fetchone()
+    conn.close()
+    assert row == ("alias",)
+
+
+def test_report_naming_inconsistencies_ignores_calc_usage(tmp_path, capsys):
+    # 同じカラムが複数の計算式で使われていても、それは「表記ゆれ」ではないので
+    # 通常のエイリアス(usage_type='alias')だけで判定する
+    db_path = tmp_path / "lineage.db"
+    aliases = [
+        {"table_name": "T_A", "column_name": "COL1", "display_name": "表示A", "board_name": "board1", "item_id": "i1"},
+        {"table_name": "T_A", "column_name": "COL1", "display_name": "利益率", "board_name": "board2",
+         "item_id": "i2", "usage_type": "calc"},
+        {"table_name": "T_A", "column_name": "COL1", "display_name": "税込金額", "board_name": "board3",
+         "item_id": "i3", "usage_type": "calc"},
+    ]
+    ma.build_db(str(db_path), COLUMNS, aliases)
+    ma.report_naming_inconsistencies(str(db_path))
+    out = capsys.readouterr().out
+    assert "表記ゆれ候補は見つかりませんでした" in out
+    assert "計算式内で使用されている項目: 2件" in out
+
+
 def test_build_db_normalizes_fullwidth_and_case(tmp_path, capsys):
     db_path = tmp_path / "lineage.db"
     aliases = [

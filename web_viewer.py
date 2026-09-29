@@ -74,6 +74,8 @@ INDEX_HTML = """<!DOCTYPE html>
     background: var(--accent-bg); color: var(--accent); margin: 2px 4px 2px 0;
   }
   .badge.warn { background: #fde8cc; color: var(--warn); }
+  .badge.calc { background: #e3f5e9; color: #1a7f4b; }
+  .calc-line { margin-top: 6px; font-size: 11px; color: var(--text-sub); }
   .status-ok { color: var(--text-sub); font-size: 12px; }
   .status-warn { color: var(--warn); font-size: 12px; font-weight: 600; }
   .boards { color: var(--text-sub); font-size: 12px; }
@@ -120,10 +122,12 @@ function renderCards(rows) {
   const totalColumns = rows.length;
   const naming = rows.filter(r => r.alias_count > 1).length;
   const totalUsage = rows.reduce((sum, r) => sum + (r.usage_count || 0), 0);
+  const calcUsage = rows.filter(r => r.calc_names && r.calc_names.length > 0).length;
   document.getElementById('cards').innerHTML = `
     <div class="card"><div class="label">総カラム数</div><div class="value">${totalColumns}</div></div>
     <div class="card"><div class="label">表記ゆれ候補</div><div class="value">${naming}</div></div>
     <div class="card"><div class="label">使用箇所(延べ)</div><div class="value">${totalUsage}</div></div>
+    <div class="card"><div class="label">カスタム項目/計算式で使用</div><div class="value">${calcUsage}</div></div>
   `;
 }
 
@@ -139,8 +143,12 @@ function renderTable(rows) {
 
   tbody.innerHTML = rows.map(r => {
     const isWarn = r.alias_count > 1;
+    const calcNames = r.calc_names || [];
     const aliasBadges = r.display_names.map(n =>
       `<span class="badge ${isWarn ? 'warn' : ''}">${escapeHtml(n)}</span>`
+    ).join('');
+    const calcBadges = calcNames.map(n =>
+      `<span class="badge calc">${escapeHtml(n)}</span>`
     ).join('');
     const boardList = r.boards.slice(0, 3).join(', ') + (r.boards.length > 3 ? ` 他${r.boards.length - 3}件` : '');
     return `
@@ -148,8 +156,9 @@ function renderTable(rows) {
         <td>${escapeHtml(r.table_name)}</td>
         <td><code>${escapeHtml(r.column_name)}</code></td>
         <td>
-          ${aliasBadges || '<span class="status-ok">-</span>'}
+          ${aliasBadges || (calcBadges ? '' : '<span class="status-ok">-</span>')}
           ${isWarn ? `<div class="status-warn">表記ゆれ ${r.alias_count}種</div>` : ''}
+          ${calcBadges ? `<div class="calc-line">カスタム項目/計算式で使用: ${calcBadges}</div>` : ''}
         </td>
         <td>${r.usage_count}件</td>
         <td class="boards">${escapeHtml(boardList) || '-'}</td>
@@ -168,7 +177,8 @@ document.getElementById('search').addEventListener('input', (e) => {
   const filtered = allRows.filter(r =>
     r.table_name.toLowerCase().includes(q) ||
     r.column_name.toLowerCase().includes(q) ||
-    r.display_names.some(n => n.toLowerCase().includes(q))
+    r.display_names.some(n => n.toLowerCase().includes(q)) ||
+    (r.calc_names || []).some(n => n.toLowerCase().includes(q))
   );
   renderTable(filtered);
 });
@@ -197,8 +207,9 @@ def fetch_data(db_path: str):
     cur = conn.cursor()
     cur.execute("""
         SELECT c.id, c.table_name, c.column_name,
-               GROUP_CONCAT(DISTINCT a.display_name) AS display_names,
-               COUNT(DISTINCT a.display_name) AS alias_count,
+               GROUP_CONCAT(DISTINCT CASE WHEN a.usage_type='alias' THEN a.display_name END) AS display_names,
+               GROUP_CONCAT(DISTINCT CASE WHEN a.usage_type='calc' THEN a.display_name END) AS calc_names,
+               COUNT(DISTINCT CASE WHEN a.usage_type='alias' THEN a.display_name END) AS alias_count,
                COUNT(a.id) AS usage_count,
                GROUP_CONCAT(DISTINCT a.board_name) AS boards
         FROM columns c
@@ -216,9 +227,10 @@ def fetch_data(db_path: str):
             "table_name": row[1],
             "column_name": row[2],
             "display_names": row[3].split(",") if row[3] else [],
-            "alias_count": row[4] or 0,
-            "usage_count": row[5] or 0,
-            "boards": row[6].split(",") if row[6] else [],
+            "calc_names": row[4].split(",") if row[4] else [],
+            "alias_count": row[5] or 0,
+            "usage_count": row[6] or 0,
+            "boards": row[7].split(",") if row[7] else [],
         })
     return result
 

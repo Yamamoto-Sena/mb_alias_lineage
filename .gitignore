@@ -18,3 +18,14 @@ _tmp_*
 /demo_data/board_aliases.json
 /demo_data/lineage.db
 /demo_data/column_alias_map_demo.html
+
+# 動作確認(check_*)実行時に生成される中間データ・ログ(ルート直下のみ対象)
+/check_board_aliases.json
+/check_lineage.db
+/check_match.log
+/check_out.log
+/demo_check.json
+/demo_check.log
+
+# テンプレートコピー時に混入する不要ファイル(実体は doc/DD/DD-INDEX.md)
+/doc/templates/DD-INDEX.md

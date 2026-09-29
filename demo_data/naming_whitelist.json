@@ -1,0 +1,9 @@
+{
+  "excluded_columns": [
+    {
+      "table_name": "T_売上明細",
+      "column_name": "CHIIKI_KBN",
+      "reason": "英語ダッシュボード向けに「Region」表記を意図的に使用しているため、表記ゆれ候補から除外(デモ用サンプル)"
+    }
+  ]
+}

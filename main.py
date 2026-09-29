@@ -61,6 +61,9 @@ def main() -> None:
     parser.add_argument("--db")
     parser.add_argument("--user")
     parser.add_argument("--jdbc-jar")
+    parser.add_argument("--whitelist", help="表記ゆれ候補から除外する物理カラムの設定ファイル(naming_whitelist.json)")
+    parser.add_argument("--similarity-threshold", type=float, default=0.8,
+                         help="類似度による表記ゆれ候補の閾値(0〜1、デフォルト0.8)")
     args = parser.parse_args()
 
     py = sys.executable
@@ -69,8 +72,12 @@ def main() -> None:
         run([py, "board_parser.py", "demo_data/motionboard_backup",
              "--columns", "demo_data/dr_sum_columns.json", "--out", "demo_data/board_aliases.json"],
             expect_file="demo_data/board_aliases.json")
-        run([py, "match_aliases.py", "--columns", "demo_data/dr_sum_columns.json",
-             "--aliases", "demo_data/board_aliases.json", "--db", "demo_data/lineage.db"])
+        demo_match_cmd = [py, "match_aliases.py", "--columns", "demo_data/dr_sum_columns.json",
+                          "--aliases", "demo_data/board_aliases.json", "--db", "demo_data/lineage.db"]
+        demo_whitelist = Path("demo_data/naming_whitelist.json")
+        if demo_whitelist.exists():
+            demo_match_cmd += ["--whitelist", str(demo_whitelist)]
+        run(demo_match_cmd)
         print("\nデモの結果を見るには: python web_viewer.py --db demo_data/lineage.db")
         return
 
@@ -93,7 +100,12 @@ def main() -> None:
             board_parser_cmd.append("--watch")
         run(board_parser_cmd, expect_file="board_aliases.json")
 
-    run([py, "match_aliases.py", "--columns", "dr_sum_columns.json", "--aliases", "board_aliases.json"])
+    match_cmd = [py, "match_aliases.py", "--columns", "dr_sum_columns.json", "--aliases", "board_aliases.json"]
+    if args.whitelist:
+        match_cmd += ["--whitelist", args.whitelist]
+    if args.similarity_threshold != 0.8:
+        match_cmd += ["--similarity-threshold", str(args.similarity_threshold)]
+    run(match_cmd)
 
 
 if __name__ == "__main__":

@@ -19,17 +19,25 @@
 
 ---
 
-## 1. {パターン名（例: 配列の参照切れ）}
+## 1. `http.server.HTTPServer` + フロント側`Promise.all`でハングする
 
-- **症状**: {何が起きるか（例: クリア後の再追加で変更が反映されない）}
-- **原因**: {根本原因（例: `arr = []` は新しい配列を作るため、既存参照が古い配列を指したままになる）}
+- **症状**: フロントエンドで`Promise.all([fetch(A), fetch(B)])`のように複数APIを並行取得
+  するよう変更したら、2つ目以降のリクエストが返らずページが固まる。単体でcurl等から
+  同じエンドポイントを叩いても同様にタイムアウトする。
+- **原因**: `http.server.HTTPServer`はシングルスレッドで、1つの接続を処理し終えるまで
+  次の接続をacceptしない。ブラウザがKeep-Alive接続を維持したまま次のリクエストを待つ間、
+  サーバーのメインループがブロックされ続け、別の接続（並行fetchのもう一方）を永遠に
+  処理できなくなる。ページロードが常に1リクエストのみだった間は表面化しない。
 - **正しいやり方**:
 
-```
-❌ state.items = []          // 参照が切れる
-✅ state.items.length = 0    // 同一参照のまま空にする
+```python
+❌ from http.server import HTTPServer
+   server = HTTPServer(("localhost", port), Handler)
+
+✅ from http.server import ThreadingHTTPServer
+   server = ThreadingHTTPServer(("localhost", port), Handler)  # リクエストごとにスレッドを立てる
 ```
 
-- **元DD**: {DD-番号}
+- **元DD**: DD-002-1
 
 <!-- 以降、パターンを追記していく。番号は通し番号 -->

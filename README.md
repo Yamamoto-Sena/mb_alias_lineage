@@ -142,8 +142,34 @@ Shift-JIS文字コード宣言のファイルにも対応しています。
 python match_aliases.py --columns dr_sum_columns.json --aliases board_aliases.json
 ```
 
-`lineage.db`（SQLite）にまとめて保存し、同じ物理カラムに
-複数の表示名が使われているケース（表記ゆれ候補）をコンソールに一覧出力します。
+`lineage.db`（SQLite）にまとめて保存したうえで、以下5パターンの表記ゆれ・ズレ候補を
+コンソールに一覧出力します。
+
+- **1対多**: 同じ物理カラムに複数の表示名が使われているケース
+- **多対1**: 異なる物理カラムに同じ表示名が付与されているケース（例: `T_売上.AMOUNT`と`T_受注.AMOUNT`がどちらも「金額」）
+- **物理名直接使用**: エイリアスが設定されず、物理カラム名がそのまま表示名になっているケース
+- **孤立項目（未使用カラム）**: Dr.Sum側に存在するが、MotionBoard定義で一度も使われていないカラム（計算式内での使用は「使用済み」とみなす）
+- **類似度候補**: 標準ライブラリ`difflib`による類似度判定で見つかった、表記ゆれの可能性がある表示名の組み合わせ（要目視確認。文字種が全く異なる表記〔例:「コード」と「CD」〕は検出できません）
+
+英語ダッシュボード向けの表記など、意図的な別名を候補から除外したい場合は
+`naming_whitelist.json`（物理カラム単位で除外指定）を用意し、`--whitelist`で指定します。
+
+```json
+{
+  "excluded_columns": [
+    {"table_name": "T_売上明細", "column_name": "CHIIKI_KBN", "reason": "英語版ボード向けのRegion表記"}
+  ]
+}
+```
+
+```bash
+python match_aliases.py --columns dr_sum_columns.json --aliases board_aliases.json \
+    --whitelist naming_whitelist.json --similarity-threshold 0.8
+```
+
+`--whitelist`は1対多・多対1・類似度候補の3パターンにのみ適用されます（物理名直接使用・
+孤立項目は事実の指摘であり除外対象ではありません）。`--similarity-threshold`は類似度候補の
+判定しきい値（0〜1、デフォルト0.8）です。
 
 ### 結果をブラウザで見る
 
@@ -155,6 +181,10 @@ python web_viewer.py
 表示します。**`localhost`のみで待ち受ける設計であり、実行したPC上からしか
 閲覧できません。複数人が使う共有サーバーに常時起動して使う用途には
 対応していません**（そのような使い方をしたい場合は認証機構の追加が別途必要です）。
+
+多対1マッピング候補・類似度候補は専用セクションで、物理名直接使用・未使用カラムは
+一覧テーブル上のバッジ・ミュート表示で確認できます。`web_viewer.py`/`export_static.py`
+も`match_aliases.py`と同じ`--whitelist`/`--similarity-threshold`オプションに対応しています。
 
 社内にメールやファイル共有で結果を配布したい場合は、代わりに以下でサーバー
 不要の単一HTMLファイルを生成できます（受け取った側はPython不要、ブラウザで

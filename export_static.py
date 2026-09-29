@@ -18,35 +18,48 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from web_viewer import INDEX_HTML, fetch_data, warn_if_large
+from match_aliases import load_whitelist
+from web_viewer import INDEX_HTML, fetch_cross_column_patterns, fetch_data, warn_if_large
 
 
-def build_static_html(db_path: str) -> str:
-    data = fetch_data(db_path)
-    warn_if_large(len(data))
-    data_json = json.dumps(data, ensure_ascii=False)
+def _escape_script_close(data) -> str:
     # 表示名・ボード名に"</script>"のような文字列が含まれていても<script>タグが
     # 途中で終了しないよう、埋め込み前に"</"をエスケープする(JSONの値としては同じ意味のまま)
-    data_json = data_json.replace("</", "<\\/")
+    return json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
+
+
+def build_static_html(db_path: str, whitelist: set = None, threshold: float = 0.8) -> str:
+    data = fetch_data(db_path, whitelist=whitelist)
+    warn_if_large(len(data))
+    patterns = fetch_cross_column_patterns(db_path, whitelist=whitelist, threshold=threshold)
+    data_json = _escape_script_close(data)
+    patterns_json = _escape_script_close(patterns)
     generated_at = datetime.now().strftime("%Y-%m-%d %H:%M")
 
     html = INDEX_HTML
 
-    # fetch('/api/columns') でサーバーに問い合わせている部分を、
+    # fetch('/api/columns')・fetch('/api/patterns')でサーバーに問い合わせている部分を、
     # 埋め込み済みのJSONデータを直接使う形に置き換える
     html = html.replace(
         """async function load() {
-  const res = await fetch('/api/columns');
-  allRows = await res.json();
-  renderCards(allRows);
+  const [colRes, patRes] = await Promise.all([fetch('/api/columns'), fetch('/api/patterns')]);
+  allRows = await colRes.json();
+  const patterns = await patRes.json();
+  renderCards(allRows, patterns);
   renderTable(allRows);
+  renderManyToOne(patterns.many_to_one || []);
+  renderSimilarPairs(patterns.similar_pairs || []);
 }""",
         f"""const EMBEDDED_DATA = {data_json};
+const EMBEDDED_PATTERNS = {patterns_json};
 
 async function load() {{
   allRows = EMBEDDED_DATA;
-  renderCards(allRows);
+  const patterns = EMBEDDED_PATTERNS;
+  renderCards(allRows, patterns);
   renderTable(allRows);
+  renderManyToOne(patterns.many_to_one || []);
+  renderSimilarPairs(patterns.similar_pairs || []);
 }}"""
     )
 
@@ -64,13 +77,21 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--db", default="lineage.db")
     parser.add_argument("--out", default="column_alias_map.html")
+    parser.add_argument("--whitelist", help="表記ゆれ候補から除外する物理カラムの設定ファイル(naming_whitelist.json)")
+    parser.add_argument("--similarity-threshold", type=float, default=0.8,
+                         help="類似度による表記ゆれ候補の閾値(0〜1、デフォルト0.8)")
     args = parser.parse_args()
 
     if not Path(args.db).exists():
         print(f"エラー: {args.db} が見つかりません。先に match_aliases.py を実行してください。")
         return
 
-    html = build_static_html(args.db)
+    if args.whitelist and not Path(args.whitelist).exists():
+        print(f"エラー: --whitelist で指定されたファイルが見つかりません: {args.whitelist}")
+        return
+    whitelist = load_whitelist(args.whitelist) if args.whitelist else None
+
+    html = build_static_html(args.db, whitelist=whitelist, threshold=args.similarity_threshold)
     out_path = Path(args.out)
     out_path.write_text(html, encoding="utf-8")
     print(f"{out_path} を書き出しました({out_path.stat().st_size:,} bytes)")

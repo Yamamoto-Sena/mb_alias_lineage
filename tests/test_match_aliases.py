@@ -120,6 +120,247 @@ def test_report_naming_inconsistencies_ignores_calc_usage(tmp_path, capsys):
     assert "計算式内で使用されている項目: 2件" in out
 
 
+def test_load_whitelist_returns_normalized_set(tmp_path):
+    whitelist_path = tmp_path / "naming_whitelist.json"
+    whitelist_path.write_text(
+        '{"excluded_columns": [{"table_name": "T_A", "column_name": "col1", "reason": "意図的"}]}',
+        encoding="utf-8",
+    )
+    result = ma.load_whitelist(str(whitelist_path))
+    assert result == {("T_A", "COL1")}
+
+
+def test_load_whitelist_empty_when_key_missing(tmp_path):
+    whitelist_path = tmp_path / "naming_whitelist.json"
+    whitelist_path.write_text('{}', encoding="utf-8")
+    assert ma.load_whitelist(str(whitelist_path)) == set()
+
+
+def test_report_naming_inconsistencies_excludes_whitelisted_column(tmp_path, capsys):
+    db_path = tmp_path / "lineage.db"
+    aliases = [
+        {"table_name": "T_A", "column_name": "COL1", "display_name": "表示A", "board_name": "board1", "item_id": "i1"},
+        {"table_name": "T_A", "column_name": "COL1", "display_name": "表示B", "board_name": "board2", "item_id": "i2"},
+    ]
+    ma.build_db(str(db_path), COLUMNS, aliases)
+    ma.report_naming_inconsistencies(str(db_path), whitelist={("T_A", "COL1")})
+    out = capsys.readouterr().out
+    assert "表記ゆれ候補は見つかりませんでした" in out
+
+
+def test_find_many_to_one_mappings_detects_shared_display_name_across_columns(tmp_path):
+    db_path = tmp_path / "lineage.db"
+    columns = [
+        {"table_name": "T_URIAGE", "table_type": "TABLE", "column_name": "AMOUNT", "data_type": "DECIMAL"},
+        {"table_name": "T_ORDER", "table_type": "TABLE", "column_name": "AMOUNT", "data_type": "DECIMAL"},
+    ]
+    aliases = [
+        {"table_name": "T_URIAGE", "column_name": "AMOUNT", "display_name": "金額", "board_name": "board1", "item_id": "i1"},
+        {"table_name": "T_ORDER", "column_name": "AMOUNT", "display_name": "金額", "board_name": "board2", "item_id": "i2"},
+    ]
+    ma.build_db(str(db_path), columns, aliases)
+    results = ma.find_many_to_one_mappings(str(db_path))
+    assert len(results) == 1
+    assert results[0]["display_name"] == "金額"
+    assert len(results[0]["columns"]) == 2
+
+
+def test_find_many_to_one_mappings_excludes_whitelisted_column(tmp_path):
+    db_path = tmp_path / "lineage.db"
+    columns = [
+        {"table_name": "T_URIAGE", "table_type": "TABLE", "column_name": "AMOUNT", "data_type": "DECIMAL"},
+        {"table_name": "T_ORDER", "table_type": "TABLE", "column_name": "AMOUNT", "data_type": "DECIMAL"},
+    ]
+    aliases = [
+        {"table_name": "T_URIAGE", "column_name": "AMOUNT", "display_name": "金額", "board_name": "board1", "item_id": "i1"},
+        {"table_name": "T_ORDER", "column_name": "AMOUNT", "display_name": "金額", "board_name": "board2", "item_id": "i2"},
+    ]
+    ma.build_db(str(db_path), columns, aliases)
+    # 片方だけホワイトリストに入れると、残り1カラムだけでは「多対1」にならないため候補から消える
+    results = ma.find_many_to_one_mappings(str(db_path), whitelist={("T_URIAGE", "AMOUNT")})
+    assert results == []
+
+
+def test_find_many_to_one_mappings_ignores_same_column_multiple_display_names(tmp_path):
+    # 同一カラム内の複数表示名(既存1対多検出の対象)は多対1の対象に含めない
+    db_path = tmp_path / "lineage.db"
+    aliases = [
+        {"table_name": "T_A", "column_name": "COL1", "display_name": "表示A", "board_name": "board1", "item_id": "i1"},
+        {"table_name": "T_A", "column_name": "COL1", "display_name": "表示B", "board_name": "board2", "item_id": "i2"},
+    ]
+    ma.build_db(str(db_path), COLUMNS, aliases)
+    assert ma.find_many_to_one_mappings(str(db_path)) == []
+
+
+def test_find_unaliased_columns_detects_raw_column_name_as_display_name(tmp_path):
+    db_path = tmp_path / "lineage.db"
+    aliases = [
+        {"table_name": "T_A", "column_name": "COL1", "display_name": "COL1", "board_name": "board1", "item_id": "i1"},
+    ]
+    ma.build_db(str(db_path), COLUMNS, aliases)
+    results = ma.find_unaliased_columns(str(db_path))
+    assert results == [{"table_name": "T_A", "column_name": "COL1"}]
+
+
+def test_find_unaliased_columns_normalizes_fullwidth_and_case(tmp_path):
+    db_path = tmp_path / "lineage.db"
+    aliases = [
+        {"table_name": "T_A", "column_name": "COL1", "display_name": "ｃｏｌ１", "board_name": "board1", "item_id": "i1"},
+    ]
+    ma.build_db(str(db_path), COLUMNS, aliases)
+    results = ma.find_unaliased_columns(str(db_path))
+    assert results == [{"table_name": "T_A", "column_name": "COL1"}]
+
+
+def test_find_unaliased_columns_ignores_when_alias_set(tmp_path):
+    db_path = tmp_path / "lineage.db"
+    aliases = [
+        {"table_name": "T_A", "column_name": "COL1", "display_name": "表示A", "board_name": "board1", "item_id": "i1"},
+    ]
+    ma.build_db(str(db_path), COLUMNS, aliases)
+    assert ma.find_unaliased_columns(str(db_path)) == []
+
+
+def test_find_orphan_columns_detects_columns_with_no_alias_rows(tmp_path):
+    db_path = tmp_path / "lineage.db"
+    columns = [
+        {"table_name": "T_A", "table_type": "TABLE", "column_name": "COL1", "data_type": "VARCHAR"},
+        {"table_name": "T_A", "table_type": "TABLE", "column_name": "COL2", "data_type": "VARCHAR"},
+    ]
+    aliases = [
+        {"table_name": "T_A", "column_name": "COL1", "display_name": "表示A", "board_name": "board1", "item_id": "i1"},
+    ]
+    ma.build_db(str(db_path), columns, aliases)
+    results = ma.find_orphan_columns(str(db_path))
+    assert results == [{"table_name": "T_A", "column_name": "COL2"}]
+
+
+def test_find_orphan_columns_treats_calc_only_usage_as_used(tmp_path):
+    db_path = tmp_path / "lineage.db"
+    aliases = [
+        {"table_name": "T_A", "column_name": "COL1", "display_name": "利益率", "board_name": "board1",
+         "item_id": "i1", "usage_type": "calc"},
+    ]
+    ma.build_db(str(db_path), COLUMNS, aliases)
+    assert ma.find_orphan_columns(str(db_path)) == []
+
+
+def test_find_orphan_columns_empty_when_all_used(tmp_path):
+    db_path = tmp_path / "lineage.db"
+    aliases = [
+        {"table_name": "T_A", "column_name": "COL1", "display_name": "表示A", "board_name": "board1", "item_id": "i1"},
+    ]
+    ma.build_db(str(db_path), COLUMNS, aliases)
+    assert ma.find_orphan_columns(str(db_path)) == []
+
+
+def test_find_similar_display_name_pairs_detects_pair_above_threshold(tmp_path):
+    # difflib.SequenceMatcherは文字ベースの類似度計算のため、送り仮名の有無のような
+    # 表記ゆれは高いratioになる(「コード」/「CD」のような文字種が全く異なる表記ゆれは
+    # 検出できない。これはdifflib採用時に許容した既知の精度限界)
+    db_path = tmp_path / "lineage.db"
+    columns = [
+        {"table_name": "T_UKETSUKE", "table_type": "TABLE", "column_name": "UKETSUKE_BI", "data_type": "DATE"},
+        {"table_name": "T_UKETSUKE", "table_type": "TABLE", "column_name": "UKETSUKE_YMD", "data_type": "DATE"},
+    ]
+    aliases = [
+        {"table_name": "T_UKETSUKE", "column_name": "UKETSUKE_BI", "display_name": "受付日",
+         "board_name": "board1", "item_id": "i1"},
+        {"table_name": "T_UKETSUKE", "column_name": "UKETSUKE_YMD", "display_name": "受付け日",
+         "board_name": "board2", "item_id": "i2"},
+    ]
+    ma.build_db(str(db_path), columns, aliases)
+    results = ma.find_similar_display_name_pairs(str(db_path), threshold=0.8)
+    assert len(results) == 1
+    assert results[0]["ratio"] >= 0.8
+
+
+def test_find_similar_display_name_pairs_excludes_below_threshold(tmp_path):
+    db_path = tmp_path / "lineage.db"
+    columns = [
+        {"table_name": "T_A", "table_type": "TABLE", "column_name": "COL1", "data_type": "VARCHAR"},
+        {"table_name": "T_A", "table_type": "TABLE", "column_name": "COL2", "data_type": "VARCHAR"},
+    ]
+    aliases = [
+        {"table_name": "T_A", "column_name": "COL1", "display_name": "顧客コード", "board_name": "board1", "item_id": "i1"},
+        {"table_name": "T_A", "column_name": "COL2", "display_name": "在庫数", "board_name": "board2", "item_id": "i2"},
+    ]
+    ma.build_db(str(db_path), columns, aliases)
+    results = ma.find_similar_display_name_pairs(str(db_path), threshold=0.9)
+    assert results == []
+
+
+def test_find_similar_display_name_pairs_ignores_same_column_pairs(tmp_path):
+    # 同一カラム内の複数表示名同士は比較対象に含めない(既存1対多検出の対象のため)
+    db_path = tmp_path / "lineage.db"
+    aliases = [
+        {"table_name": "T_A", "column_name": "COL1", "display_name": "顧客コード", "board_name": "board1", "item_id": "i1"},
+        {"table_name": "T_A", "column_name": "COL1", "display_name": "顧客ＣＤ", "board_name": "board2", "item_id": "i2"},
+    ]
+    ma.build_db(str(db_path), COLUMNS, aliases)
+    results = ma.find_similar_display_name_pairs(str(db_path), threshold=0.5)
+    assert results == []
+
+
+def test_find_similar_display_name_pairs_excludes_whitelisted_column(tmp_path):
+    db_path = tmp_path / "lineage.db"
+    columns = [
+        {"table_name": "T_UKETSUKE", "table_type": "TABLE", "column_name": "UKETSUKE_BI", "data_type": "DATE"},
+        {"table_name": "T_UKETSUKE", "table_type": "TABLE", "column_name": "UKETSUKE_YMD", "data_type": "DATE"},
+    ]
+    aliases = [
+        {"table_name": "T_UKETSUKE", "column_name": "UKETSUKE_BI", "display_name": "受付日",
+         "board_name": "board1", "item_id": "i1"},
+        {"table_name": "T_UKETSUKE", "column_name": "UKETSUKE_YMD", "display_name": "受付け日",
+         "board_name": "board2", "item_id": "i2"},
+    ]
+    ma.build_db(str(db_path), columns, aliases)
+    results = ma.find_similar_display_name_pairs(
+        str(db_path), threshold=0.8, whitelist={("T_UKETSUKE", "UKETSUKE_BI")}
+    )
+    assert results == []
+
+
+def test_report_many_to_one_mapping_no_candidates(tmp_path, capsys):
+    db_path = tmp_path / "lineage.db"
+    aliases = [
+        {"table_name": "T_A", "column_name": "COL1", "display_name": "表示A", "board_name": "board1", "item_id": "i1"},
+    ]
+    ma.build_db(str(db_path), COLUMNS, aliases)
+    ma.report_many_to_one_mapping(str(db_path))
+    assert "多対1マッピング候補は見つかりませんでした" in capsys.readouterr().out
+
+
+def test_report_unaliased_columns_no_candidates(tmp_path, capsys):
+    db_path = tmp_path / "lineage.db"
+    aliases = [
+        {"table_name": "T_A", "column_name": "COL1", "display_name": "表示A", "board_name": "board1", "item_id": "i1"},
+    ]
+    ma.build_db(str(db_path), COLUMNS, aliases)
+    ma.report_unaliased_columns(str(db_path))
+    assert "物理名直接使用の候補は見つかりませんでした" in capsys.readouterr().out
+
+
+def test_report_orphan_columns_no_candidates(tmp_path, capsys):
+    db_path = tmp_path / "lineage.db"
+    aliases = [
+        {"table_name": "T_A", "column_name": "COL1", "display_name": "表示A", "board_name": "board1", "item_id": "i1"},
+    ]
+    ma.build_db(str(db_path), COLUMNS, aliases)
+    ma.report_orphan_columns(str(db_path))
+    assert "孤立項目(未使用カラム)は見つかりませんでした" in capsys.readouterr().out
+
+
+def test_report_similar_display_name_pairs_no_candidates(tmp_path, capsys):
+    db_path = tmp_path / "lineage.db"
+    aliases = [
+        {"table_name": "T_A", "column_name": "COL1", "display_name": "表示A", "board_name": "board1", "item_id": "i1"},
+    ]
+    ma.build_db(str(db_path), COLUMNS, aliases)
+    ma.report_similar_display_name_pairs(str(db_path))
+    assert "類似度による表記ゆれ候補は見つかりませんでした" in capsys.readouterr().out
+
+
 def test_build_db_normalizes_fullwidth_and_case(tmp_path, capsys):
     db_path = tmp_path / "lineage.db"
     aliases = [

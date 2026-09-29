@@ -35,3 +35,8 @@ python export_static.py --db demo_data/lineage.db --out demo_data/column_alias_m
 同じ物理カラムがボードごとに異なる表示名で使われている「表記ゆれ」が4件見つかる
 ように意図的に構成してあります。`python main.py --demo`実行後、`web_viewer.py`の
 画面でこの表記ゆれがハイライト表示される様子がそのままデモになります。
+
+`naming_whitelist.json`も用意してあり、`CHIIKI_KBN`を「英語ダッシュボード向けの
+意図的な別名」として表記ゆれ候補から除外するサンプルになっています。
+`python main.py --demo`はこのファイルが存在すれば自動的に読み込むため、実行前後で
+`CHIIKI_KBN`が表記ゆれ候補から消えることを確認できます。

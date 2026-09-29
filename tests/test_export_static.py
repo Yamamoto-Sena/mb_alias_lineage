@@ -63,3 +63,9 @@ def test_build_static_html_warns_on_large_dataset(tmp_path, capsys, monkeypatch)
     monkeypatch.setattr(es, "warn_if_large", lambda n: print(f"warned:{n}"))
     es.build_static_html(_make_db(tmp_path))
     assert "warned:1" in capsys.readouterr().out
+
+
+def test_build_static_html_embeds_patterns(tmp_path):
+    html = es.build_static_html(_make_db(tmp_path))
+    assert "EMBEDDED_PATTERNS" in html
+    assert "fetch('/api/patterns')" not in html

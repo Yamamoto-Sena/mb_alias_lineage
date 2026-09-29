@@ -75,6 +75,62 @@ def test_fetch_data_calc_usage_is_separated_from_aliases(tmp_path):
     assert row["usage_count"] == 2  # 使用件数(延べ)には両方カウントされる
 
 
+def test_fetch_data_flags_unaliased_column(tmp_path):
+    db_path = _make_db(tmp_path, [(1, "T_A", "COL1", [("COL1", "board1")])])
+    result = wv.fetch_data(db_path)
+    assert result[0]["is_unaliased"] is True
+
+
+def test_fetch_data_does_not_flag_when_alias_set(tmp_path):
+    db_path = _make_db(tmp_path, [(1, "T_A", "COL1", [("表示A", "board1")])])
+    result = wv.fetch_data(db_path)
+    assert result[0]["is_unaliased"] is False
+
+
+def test_fetch_data_flags_orphan_column(tmp_path):
+    db_path = _make_db(tmp_path, [(1, "T_A", "COL1", [])])
+    result = wv.fetch_data(db_path)
+    assert result[0]["is_orphan"] is True
+
+
+def test_fetch_data_does_not_flag_orphan_when_used(tmp_path):
+    db_path = _make_db(tmp_path, [(1, "T_A", "COL1", [("表示A", "board1")])])
+    result = wv.fetch_data(db_path)
+    assert result[0]["is_orphan"] is False
+
+
+def test_fetch_data_flags_naming_variant_when_alias_count_over_one(tmp_path):
+    db_path = _make_db(tmp_path, [(1, "T_A", "COL1", [("表示A", "board1"), ("表示B", "board2")])])
+    result = wv.fetch_data(db_path)
+    assert result[0]["is_naming_variant"] is True
+
+
+def test_fetch_data_whitelist_suppresses_naming_variant_flag(tmp_path):
+    db_path = _make_db(tmp_path, [(1, "T_A", "COL1", [("表示A", "board1"), ("表示B", "board2")])])
+    result = wv.fetch_data(db_path, whitelist={("T_A", "COL1")})
+    assert result[0]["is_naming_variant"] is False
+    assert result[0]["alias_count"] == 2  # alias_count自体は保持する(表示件数として使うため)
+
+
+def test_fetch_cross_column_patterns_detects_many_to_one(tmp_path):
+    db_path = _make_db(tmp_path, [
+        (1, "T_A", "COL1", [("金額", "board1")]),
+        (2, "T_B", "COL1", [("金額", "board2")]),
+    ])
+    patterns = wv.fetch_cross_column_patterns(db_path)
+    assert len(patterns["many_to_one"]) == 1
+    assert patterns["many_to_one"][0]["display_name"] == "金額"
+
+
+def test_fetch_cross_column_patterns_excludes_whitelisted_column(tmp_path):
+    db_path = _make_db(tmp_path, [
+        (1, "T_A", "COL1", [("金額", "board1")]),
+        (2, "T_B", "COL1", [("金額", "board2")]),
+    ])
+    patterns = wv.fetch_cross_column_patterns(db_path, whitelist={("T_A", "COL1")})
+    assert patterns["many_to_one"] == []
+
+
 def test_warn_if_large_below_threshold_is_silent(capsys):
     wv.warn_if_large(wv.LARGE_DATASET_WARNING_THRESHOLD)
     assert capsys.readouterr().out == ""

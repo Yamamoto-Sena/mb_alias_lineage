@@ -12,12 +12,14 @@ _tmp_*
 /dr_sum_columns.json
 /board_aliases.json
 /column_alias_map.html
+/*.history.json
 
 # デモ用データ(demo_data/)の中間生成物。dr_sum_columns.json・motionboard_backup/・
 # dummygen_schema.yaml・build_dr_sum_columns.py はソースなので除外しない
 /demo_data/board_aliases.json
 /demo_data/lineage.db
 /demo_data/column_alias_map_demo.html
+/demo_data/*.history.json
 
 # 動作確認(check_*)実行時に生成される中間データ・ログ(ルート直下のみ対象)
 /check_board_aliases.json

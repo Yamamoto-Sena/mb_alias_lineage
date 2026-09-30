@@ -11,6 +11,7 @@ import difflib
 import json
 import sqlite3
 import unicodedata
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -118,7 +119,11 @@ def build_db(db_path: str, columns: list, aliases: list) -> None:
               f"（テーブル名の表記ゆれや、取得漏れの可能性があります）")
 
 
-def report_naming_inconsistencies(db_path: str, whitelist: set = None) -> None:
+def find_naming_inconsistencies(db_path: str, whitelist: set = None) -> list:
+    """同じ物理カラムに複数の表示名(usage_type='alias')が付与されているケースを検出する。
+
+    戻り値: [(table_name, column_name, alias_count, display_names, usage_count), ...]
+    """
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
     cur.execute(
@@ -135,13 +140,21 @@ def report_naming_inconsistencies(db_path: str, whitelist: set = None) -> None:
         """
     )
     rows = cur.fetchall()
-
-    cur.execute("SELECT COUNT(*) FROM aliases WHERE usage_type='calc'")
-    calc_count = cur.fetchone()[0]
     conn.close()
 
     if whitelist:
         rows = [r for r in rows if _normalize_key(r[0], r[1]) not in whitelist]
+    return rows
+
+
+def report_naming_inconsistencies(db_path: str, whitelist: set = None) -> None:
+    rows = find_naming_inconsistencies(db_path, whitelist=whitelist)
+
+    conn = sqlite3.connect(db_path)
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM aliases WHERE usage_type='calc'")
+    calc_count = cur.fetchone()[0]
+    conn.close()
 
     if calc_count:
         print(f"※ カスタム項目・事後計算項目の計算式内で使用されている項目: {calc_count}件"
@@ -332,6 +345,51 @@ def report_similar_display_name_pairs(db_path: str, threshold: float = 0.8, whit
               f" (類似度: {r['ratio']:.2f})\n")
 
 
+def collect_category_counts(db_path: str, whitelist: set = None, threshold: float = 0.8) -> dict:
+    """5カテゴリの検出件数をまとめて取得する(実行履歴・通知連携での差分検知用)。"""
+    return {
+        "naming_inconsistencies": len(find_naming_inconsistencies(db_path, whitelist=whitelist)),
+        "many_to_one": len(find_many_to_one_mappings(db_path, whitelist=whitelist)),
+        "unaliased_columns": len(find_unaliased_columns(db_path)),
+        "orphan_columns": len(find_orphan_columns(db_path)),
+        "similar_display_name_pairs": len(
+            find_similar_display_name_pairs(db_path, threshold=threshold, whitelist=whitelist)
+        ),
+    }
+
+
+def report_history_diff(history_path: str, counts: dict) -> None:
+    """前回実行時の件数(history_path)と今回のcountsを比較し、新規/増減を表示してから保存する。
+
+    lineage.db自体は実行ごとにDROP→CREATEするスナップショット設計(db_schema.sql参照)のため、
+    履歴はDBの外側にこのJSONファイルとして持つ。定期実行(タスクスケジューラ等)での運用や、
+    将来の通知連携(送信先確定後)での「新規検出・増減があった時のみ通知」判定にそのまま使える。
+    """
+    path = Path(history_path)
+    previous = json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+    prev_counts = previous.get("counts", {}) if previous else {}
+
+    print(f"\n実行履歴との差分(前回: {previous['recorded_at'] if previous else 'なし'})\n" + "-" * 60)
+    for category, count in counts.items():
+        prev = prev_counts.get(category)
+        if prev is None:
+            print(f"{category}: {count}件(前回実行なし)")
+            continue
+        delta = count - prev
+        if delta == 0:
+            print(f"{category}: {count}件(変化なし)")
+        else:
+            print(f"{category}: {count}件(前回{prev}件から{delta:+d})")
+
+    path.write_text(
+        json.dumps(
+            {"counts": counts, "recorded_at": datetime.now(timezone.utc).isoformat()},
+            ensure_ascii=False, indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--columns", required=True, help="dr_sum_metadata.pyの出力ファイル")
@@ -340,7 +398,11 @@ def main() -> None:
     parser.add_argument("--whitelist", help="表記ゆれ候補から除外する物理カラムの設定ファイル(naming_whitelist.json)")
     parser.add_argument("--similarity-threshold", type=float, default=0.8,
                          help="類似度による表記ゆれ候補の閾値(0〜1、デフォルト0.8)")
+    parser.add_argument("--history-file",
+                         help="前回実行との差分検知に使う実行履歴ファイル"
+                              "(既定値: <db>.history.json。--dbが違えば履歴も混在しない)")
     args = parser.parse_args()
+    history_file = args.history_file or f"{args.db}.history.json"
 
     if args.whitelist and not Path(args.whitelist).exists():
         parser.error(f"--whitelist で指定されたファイルが見つかりません: {args.whitelist}")
@@ -356,6 +418,9 @@ def main() -> None:
     report_unaliased_columns(args.db)
     report_orphan_columns(args.db)
     report_similar_display_name_pairs(args.db, threshold=args.similarity_threshold, whitelist=whitelist)
+
+    counts = collect_category_counts(args.db, whitelist=whitelist, threshold=args.similarity_threshold)
+    report_history_diff(history_file, counts)
 
 
 if __name__ == "__main__":

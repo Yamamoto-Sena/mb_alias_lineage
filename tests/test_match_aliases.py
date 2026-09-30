@@ -374,3 +374,46 @@ def test_build_db_normalizes_fullwidth_and_case(tmp_path, capsys):
     conn.close()
     assert rows == [("T_A", "COL1")]  # "(不明)"として仮登録されていない
     assert "正規化により追加で一致した" in capsys.readouterr().out
+
+
+def test_collect_category_counts_matches_find_functions(tmp_path):
+    db_path = tmp_path / "lineage.db"
+    aliases = [
+        {"table_name": "T_A", "column_name": "COL1", "display_name": "表示A", "board_name": "board1", "item_id": "i1"},
+        {"table_name": "T_A", "column_name": "COL1", "display_name": "表示B", "board_name": "board2", "item_id": "i2"},
+    ]
+    ma.build_db(str(db_path), COLUMNS, aliases)
+    counts = ma.collect_category_counts(str(db_path))
+    assert counts["naming_inconsistencies"] == len(ma.find_naming_inconsistencies(str(db_path)))
+    assert counts["many_to_one"] == len(ma.find_many_to_one_mappings(str(db_path)))
+    assert counts["unaliased_columns"] == len(ma.find_unaliased_columns(str(db_path)))
+    assert counts["orphan_columns"] == len(ma.find_orphan_columns(str(db_path)))
+    assert counts["similar_display_name_pairs"] == len(ma.find_similar_display_name_pairs(str(db_path)))
+
+
+def test_report_history_diff_first_run_has_no_previous(tmp_path, capsys):
+    history_path = tmp_path / "run_history.json"
+    ma.report_history_diff(str(history_path), {"naming_inconsistencies": 3})
+    out = capsys.readouterr().out
+    assert "前回実行なし" in out
+    assert history_path.exists()
+
+
+def test_report_history_diff_second_run_shows_delta(tmp_path, capsys):
+    history_path = tmp_path / "run_history.json"
+    ma.report_history_diff(str(history_path), {"naming_inconsistencies": 3})
+    capsys.readouterr()
+
+    ma.report_history_diff(str(history_path), {"naming_inconsistencies": 5})
+    out = capsys.readouterr().out
+    assert "前回3件から+2" in out
+
+
+def test_report_history_diff_no_change(tmp_path, capsys):
+    history_path = tmp_path / "run_history.json"
+    ma.report_history_diff(str(history_path), {"naming_inconsistencies": 3})
+    capsys.readouterr()
+
+    ma.report_history_diff(str(history_path), {"naming_inconsistencies": 3})
+    out = capsys.readouterr().out
+    assert "変化なし" in out

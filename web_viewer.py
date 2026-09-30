@@ -993,12 +993,16 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path in ("/", "/index.html"):
             self._send_html(INDEX_HTML)
         elif parsed.path == "/api/columns":
+            if not self._require_db():
+                return
             try:
                 data = fetch_data(self.server.db_path, whitelist=self.server.whitelist)
                 self._send_json(data)
             except Exception as e:
                 self._send_json({"error": str(e)}, status=500)
         elif parsed.path == "/api/patterns":
+            if not self._require_db():
+                return
             try:
                 data = fetch_cross_column_patterns(
                     self.server.db_path,
@@ -1009,6 +1013,8 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._send_json({"error": str(e)}, status=500)
         elif parsed.path == "/api/board_details":
+            if not self._require_db():
+                return
             try:
                 data = fetch_board_details(self.server.db_path)
                 self._send_json(data)
@@ -1023,6 +1029,17 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self.send_response(404)
             self.end_headers()
+
+    def _require_db(self) -> bool:
+        """lineage.dbがまだ無い場合(--connect起動直後等)にエラーを返し、
+        sqlite3.connect()が未存在ファイルを自動生成してしまうのを防ぐ(DD-007で発覚した不具合の修正)。"""
+        if not Path(self.server.db_path).exists():
+            self._send_json(
+                {"error": f"{self.server.db_path} がまだ存在しません。「Dr.Sumに接続」から作成してください。"},
+                status=404,
+            )
+            return False
+        return True
 
     def do_POST(self):
         parsed = urlparse(self.path)
@@ -1181,12 +1198,20 @@ def main() -> None:
     whitelist_path = args.whitelist or DEFAULT_WHITELIST_PATH
     whitelist = load_whitelist(whitelist_path) if Path(whitelist_path).exists() else set()
 
+    row_count = None
     if Path(args.db).exists():
-        with sqlite3.connect(args.db) as conn:
-            row_count = conn.execute("SELECT COUNT(*) FROM columns").fetchone()[0]
+        try:
+            with sqlite3.connect(args.db) as conn:
+                row_count = conn.execute("SELECT COUNT(*) FROM columns").fetchone()[0]
+        except sqlite3.OperationalError:
+            # columnsテーブルが無い(--connect起動直後にAPIがsqlite3.connect()で
+            # 自動生成した空ファイル等)。--connectで作り直せばよいだけなので
+            # クラッシュさせず、未作成と同じ扱いにする
+            row_count = None
+    if row_count is not None:
         warn_if_large(row_count)
     else:
-        print(f"※ {args.db} がまだ存在しません。画面の「Dr.Sumに接続」から作成してください。")
+        print(f"※ {args.db} にまだ有効なデータがありません。画面の「Dr.Sumに接続」から作成してください。")
 
     # 1リクエストずつしか処理できないHTTPServerだと、Promise.allで/api/columnsと
     # /api/patternsを並行取得する際にKeep-Alive接続待ちでハングすることがあるため、

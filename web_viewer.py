@@ -118,12 +118,17 @@ INDEX_HTML = """<!DOCTYPE html>
   .drilldown-count { font-size: 12px; color: var(--text-sub); white-space: nowrap; }
   .drilldown-hint { text-align: center; padding: 32px; color: var(--text-sub); font-size: 13px; }
 
-  .wl-btn, .wl-remove-btn {
+  .wl-btn, .wl-remove-btn, .wl-confirm-btn, .wl-cancel-btn {
     font-size: 11px; border: none; border-radius: 6px; padding: 3px 8px;
     cursor: pointer; white-space: nowrap; margin-left: 6px;
   }
-  .wl-btn { color: var(--accent); background: var(--accent-bg); }
+  .wl-btn, .wl-confirm-btn { color: var(--accent); background: var(--accent-bg); }
   .wl-remove-btn { color: #b91c1c; background: #fde8e8; }
+  .wl-cancel-btn { color: var(--text-sub); background: #ececef; }
+  .wl-reason-input {
+    font-size: 12px; padding: 2px 6px; border: 1px solid var(--border); border-radius: 6px;
+    width: 140px; margin-left: 6px;
+  }
 </style>
 </head>
 <body>
@@ -248,7 +253,27 @@ async function load() {
 
 function whitelistAddButton(tableName, columnName) {
   if (STATIC_EXPORT) return '';
-  return `<button class="wl-btn" data-table="${escapeHtml(tableName)}" data-column="${escapeHtml(columnName)}">ホワイトリストに追加</button>`;
+  return `<span class="wl-add" data-table="${escapeHtml(tableName)}" data-column="${escapeHtml(columnName)}">${wlButtonHtml()}</span>`;
+}
+
+function wlButtonHtml() {
+  return `<button class="wl-btn">ホワイトリストに追加</button>`;
+}
+
+function wlFormHtml() {
+  return `<input type="text" class="wl-reason-input" placeholder="理由(任意)">` +
+    `<button class="wl-confirm-btn">登録</button>` +
+    `<button class="wl-cancel-btn">キャンセル</button>`;
+}
+
+async function submitWhitelistAdd(wrap) {
+  const reason = wrap.querySelector('.wl-reason-input').value;
+  await fetch('/api/whitelist', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({table_name: wrap.dataset.table, column_name: wrap.dataset.column, reason}),
+  });
+  location.reload();
 }
 
 function renderCards(rows, patterns) {
@@ -470,14 +495,22 @@ document.getElementById('clear-filter').addEventListener('click', () => {
 document.body.addEventListener('click', async (e) => {
   const addBtn = e.target.closest('.wl-btn');
   if (addBtn) {
-    // 理由(reason)は任意項目のため入力ダイアログは出さず、空欄で登録する。
-    // 理由を残したい場合はnaming_whitelist.jsonを直接編集するか、後日の拡張で対応する。
-    await fetch('/api/whitelist', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({table_name: addBtn.dataset.table, column_name: addBtn.dataset.column, reason: ''}),
-    });
-    location.reload();
+    // window.prompt()は自動操作ブラウザでは未サポートのため、ページ内でその場に
+    // 入力欄を展開する(DD-004)。
+    const wrap = addBtn.closest('.wl-add');
+    wrap.innerHTML = wlFormHtml();
+    wrap.querySelector('.wl-reason-input').focus();
+    return;
+  }
+  const cancelBtn = e.target.closest('.wl-cancel-btn');
+  if (cancelBtn) {
+    const wrap = cancelBtn.closest('.wl-add');
+    wrap.innerHTML = wlButtonHtml();
+    return;
+  }
+  const confirmBtn = e.target.closest('.wl-confirm-btn');
+  if (confirmBtn) {
+    await submitWhitelistAdd(confirmBtn.closest('.wl-add'));
     return;
   }
   const delBtn = e.target.closest('.wl-remove-btn');
@@ -489,6 +522,12 @@ document.body.addEventListener('click', async (e) => {
     });
     location.reload();
   }
+});
+
+document.body.addEventListener('keydown', async (e) => {
+  if (e.key !== 'Enter' || !e.target.classList.contains('wl-reason-input')) return;
+  e.preventDefault();
+  await submitWhitelistAdd(e.target.closest('.wl-add'));
 });
 
 load();

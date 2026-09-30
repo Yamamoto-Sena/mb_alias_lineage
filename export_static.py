@@ -19,7 +19,13 @@ from datetime import datetime
 from pathlib import Path
 
 from match_aliases import load_whitelist
-from web_viewer import INDEX_HTML, fetch_cross_column_patterns, fetch_data, warn_if_large
+from web_viewer import (
+    INDEX_HTML,
+    fetch_board_details,
+    fetch_cross_column_patterns,
+    fetch_data,
+    warn_if_large,
+)
 
 
 def _escape_script_close(data) -> str:
@@ -32,34 +38,45 @@ def build_static_html(db_path: str, whitelist: set = None, threshold: float = 0.
     data = fetch_data(db_path, whitelist=whitelist)
     warn_if_large(len(data))
     patterns = fetch_cross_column_patterns(db_path, whitelist=whitelist, threshold=threshold)
+    board_details = fetch_board_details(db_path)
     data_json = _escape_script_close(data)
     patterns_json = _escape_script_close(patterns)
+    board_details_json = _escape_script_close(board_details)
     generated_at = datetime.now().strftime("%Y-%m-%d %H:%M")
 
     html = INDEX_HTML
 
-    # fetch('/api/columns')・fetch('/api/patterns')でサーバーに問い合わせている部分を、
-    # 埋め込み済みのJSONデータを直接使う形に置き換える
+    # fetch('/api/columns')・fetch('/api/patterns')・fetch('/api/board_details')で
+    # サーバーに問い合わせている部分を、埋め込み済みのJSONデータを直接使う形に置き換える
     html = html.replace(
         """async function load() {
-  const [colRes, patRes] = await Promise.all([fetch('/api/columns'), fetch('/api/patterns')]);
+  const [colRes, patRes, boardRes] = await Promise.all([
+    fetch('/api/columns'), fetch('/api/patterns'), fetch('/api/board_details'),
+  ]);
   allRows = await colRes.json();
   const patterns = await patRes.json();
+  const boardDetails = await boardRes.json();
+  lastPatterns = patterns;
   renderCards(allRows, patterns);
   renderTable(allRows);
   renderManyToOne(patterns.many_to_one || []);
   renderSimilarPairs(patterns.similar_pairs || []);
+  initBoardDrilldown(boardDetails);
 }""",
         f"""const EMBEDDED_DATA = {data_json};
 const EMBEDDED_PATTERNS = {patterns_json};
+const EMBEDDED_BOARD_DETAILS = {board_details_json};
 
 async function load() {{
   allRows = EMBEDDED_DATA;
   const patterns = EMBEDDED_PATTERNS;
+  const boardDetails = EMBEDDED_BOARD_DETAILS;
+  lastPatterns = patterns;
   renderCards(allRows, patterns);
   renderTable(allRows);
   renderManyToOne(patterns.many_to_one || []);
   renderSimilarPairs(patterns.similar_pairs || []);
+  initBoardDrilldown(boardDetails);
 }}"""
     )
 

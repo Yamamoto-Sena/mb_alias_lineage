@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>[モック] カラム・エイリアス使用状況マップ</title>
+<style>
+  :root {
+    --bg: #f7f7f8;
+    --surface: #ffffff;
+    --border: #e3e3e6;
+    --text: #1f1f23;
+    --text-sub: #6b6b74;
+    --accent: #4f46e5;
+    --accent-bg: #eef0fd;
+    --warn: #b45309;
+    --warn-bg: #fef3e2;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, "Segoe UI", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 32px 24px 64px; }
+  .mock-banner {
+    background: #fff3cd; border: 1px solid #ffe69c; color: #664d03;
+    border-radius: 8px; padding: 10px 14px; font-size: 12px; margin-bottom: 20px;
+  }
+  h1 { font-size: 19px; font-weight: 600; margin: 0 0 4px; }
+  .sub { color: var(--text-sub); font-size: 13px; margin: 0 0 24px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px,1fr)); gap: 12px; margin-bottom: 24px; }
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px 16px; cursor: pointer; transition: border-color .15s, box-shadow .15s;
+    user-select: none;
+  }
+  .card:hover { border-color: #c7c9f5; }
+  .card.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-bg) inset; }
+  .card.disabled { cursor: default; }
+  .card.disabled:hover { border-color: var(--border); }
+  .card .label { font-size: 12px; color: var(--text-sub); margin-bottom: 6px; display: flex; align-items: center; gap: 6px; }
+  .card .label .hint { font-size: 10px; color: var(--accent); }
+  .card .value { font-size: 22px; font-weight: 600; }
+  .toolbar { margin-bottom: 12px; display: flex; gap: 8px; align-items: center; }
+  .toolbar input[type=text] {
+    flex: 1; padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px;
+    font-size: 13px; background: var(--surface); color: var(--text);
+  }
+  .clear-filter {
+    font-size: 12px; color: var(--accent); background: var(--accent-bg); border: none;
+    border-radius: 6px; padding: 8px 12px; cursor: pointer; white-space: nowrap;
+  }
+  .clear-filter:disabled { opacity: .4; cursor: default; }
+  table { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  thead th {
+    text-align: left; font-size: 12px; color: var(--text-sub); font-weight: 500;
+    padding: 10px 12px; border-bottom: 1px solid var(--border); background: #fafafb;
+  }
+  tbody td { padding: 10px 12px; font-size: 13px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr.warn { background: var(--warn-bg); }
+  tbody tr.orphan { opacity: 0.55; }
+  .badge {
+    display: inline-block; padding: 2px 8px; border-radius: 6px; font-size: 11px;
+    background: var(--accent-bg); color: var(--accent); margin: 2px 4px 2px 0;
+  }
+  .badge.warn { background: #fde8cc; color: var(--warn); }
+  .badge.calc { background: #e3f5e9; color: #1a7f4b; }
+  .badge.unaliased { background: #ececef; color: var(--text-sub); }
+  .calc-line { margin-top: 6px; font-size: 11px; color: var(--text-sub); }
+  .status-ok { color: var(--text-sub); font-size: 12px; }
+  .status-warn { color: var(--warn); font-size: 12px; font-weight: 600; }
+  .boards { color: var(--text-sub); font-size: 12px; }
+  .empty { text-align: center; padding: 40px; color: var(--text-sub); }
+  h2 { font-size: 15px; font-weight: 600; margin: 32px 0 10px; }
+  .ratio { color: var(--text-sub); font-size: 12px; }
+
+  /* --- ボード別ドリルダウン（新規セクション） --- */
+  .drilldown-toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
+  .drilldown-toolbar select {
+    flex: 1; padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px;
+    font-size: 13px; background: var(--surface); color: var(--text);
+  }
+  .drilldown-count { font-size: 12px; color: var(--text-sub); white-space: nowrap; }
+  .drilldown-hint { text-align: center; padding: 32px; color: var(--text-sub); font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="mock-banner">
+    🎨 これはDD-002-4のHTMLモックです（ダミーデータ・見た目とインタラクションの確認用）。
+    実データには接続していません。
+  </div>
+
+  <h1>カラム・エイリアス使用状況マップ</h1>
+  <p class="sub">Dr.Sum物理カラム ⇔ MotionBoard表示名の対応関係(lineage.dbより)</p>
+
+  <div class="cards" id="cards"></div>
+
+  <div class="toolbar">
+    <input type="text" id="search" placeholder="物理カラム名・テーブル名・表示名・ボード名で検索">
+    <button class="clear-filter" id="clear-filter" disabled>カード絞り込み解除</button>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width:16%">テーブル/ビュー</th>
+        <th style="width:16%">物理カラム名</th>
+        <th style="width:34%">表示名(エイリアス)</th>
+        <th style="width:10%">使用件数</th>
+        <th style="width:24%">使用ボード</th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+  <div id="empty" class="empty" style="display:none">該当するカラムがありません</div>
+
+  <h2>ボード別ドリルダウン</h2>
+  <div class="drilldown-toolbar">
+    <select id="board-select">
+      <option value="">ボードを選択してください</option>
+    </select>
+    <span class="drilldown-count" id="drilldown-count"></span>
+  </div>
+  <div id="drilldown-hint" class="drilldown-hint">ボードを選択すると、そのボードが使用している物理カラム→表示名の対応が一覧表示されます</div>
+  <table id="drilldown-table" style="display:none">
+    <thead>
+      <tr>
+        <th style="width:22%">テーブル/ビュー</th>
+        <th style="width:22%">物理カラム名</th>
+        <th style="width:34%">表示名</th>
+        <th style="width:12%">種別</th>
+        <th style="width:10%">アイテムID</th>
+      </tr>
+    </thead>
+    <tbody id="drilldown-tbody"></tbody>
+  </table>
+</div>
+
+<script>
+// ============================================================
+// ダミーデータ(実装時は fetch_data / fetch_board_details の戻り値に置き換わる)
+// ============================================================
+const allRows = [
+  { table_name: "T_売上明細", column_name: "URIAGE_KIN", display_names: ["売上金額", "Revenue"], calc_names: [], alias_count: 2, usage_count: 3, boards: ["月次売上", "海外向けサマリー"], is_unaliased: false, is_orphan: false, is_naming_variant: true },
+  { table_name: "T_顧客M", column_name: "KOKYAKU_CD", display_names: ["顧客コード"], calc_names: [], alias_count: 1, usage_count: 1, boards: ["顧客一覧"], is_unaliased: false, is_orphan: false, is_naming_variant: false },
+  { table_name: "T_売上明細", column_name: "CHIIKI_KBN", display_names: ["地域区分", "エリア", "Region"], calc_names: [], alias_count: 3, usage_count: 3, boards: ["地域別実績", "支社別KPI", "海外向けサマリー"], is_unaliased: false, is_orphan: false, is_naming_variant: true },
+  { table_name: "T_在庫", column_name: "ZAIKO_SU", display_names: ["在庫数"], calc_names: [], alias_count: 1, usage_count: 1, boards: ["在庫アラート"], is_unaliased: false, is_orphan: false, is_naming_variant: false },
+  { table_name: "T_売上明細", column_name: "TANKA", display_names: ["TANKA"], calc_names: [], alias_count: 1, usage_count: 1, boards: ["月次売上"], is_unaliased: true, is_orphan: false, is_naming_variant: false },
+  { table_name: "T_商品M", column_name: "SHOHIN_BUNRUI", display_names: [], calc_names: [], alias_count: 0, usage_count: 0, boards: [], is_unaliased: false, is_orphan: true, is_naming_variant: false },
+  { table_name: "T_売上明細", column_name: "ORDER_DATE", display_names: ["注文日"], calc_names: ["注文年月"], alias_count: 1, usage_count: 2, boards: ["月次売上", "海外向けサマリー"], is_unaliased: false, is_orphan: false, is_naming_variant: false },
+];
+
+const boardDetails = [
+  { board_name: "月次売上", table_name: "T_売上明細", column_name: "URIAGE_KIN", display_name: "売上金額", usage_type: "alias", item_id: "item001" },
+  { board_name: "月次売上", table_name: "T_売上明細", column_name: "TANKA", display_name: "TANKA", usage_type: "alias", item_id: "item002" },
+  { board_name: "月次売上", table_name: "T_売上明細", column_name: "ORDER_DATE", display_name: "注文日", usage_type: "alias", item_id: "item003" },
+  { board_name: "月次売上", table_name: "T_売上明細", column_name: "ORDER_DATE", display_name: "注文年月", usage_type: "calc", item_id: "item004" },
+  { board_name: "海外向けサマリー", table_name: "T_売上明細", column_name: "URIAGE_KIN", display_name: "Revenue", usage_type: "alias", item_id: "item045" },
+  { board_name: "海外向けサマリー", table_name: "T_売上明細", column_name: "CHIIKI_KBN", display_name: "Region", usage_type: "alias", item_id: "item046" },
+  { board_name: "海外向けサマリー", table_name: "T_売上明細", column_name: "ORDER_DATE", display_name: "注文日", usage_type: "alias", item_id: "item047" },
+  { board_name: "地域別実績", table_name: "T_売上明細", column_name: "CHIIKI_KBN", display_name: "地域区分", usage_type: "alias", item_id: "item022" },
+  { board_name: "支社別KPI", table_name: "T_売上明細", column_name: "CHIIKI_KBN", display_name: "エリア", usage_type: "alias", item_id: "item031" },
+  { board_name: "顧客一覧", table_name: "T_顧客M", column_name: "KOKYAKU_CD", display_name: "顧客コード", usage_type: "alias", item_id: "item010" },
+  { board_name: "在庫アラート", table_name: "T_在庫", column_name: "ZAIKO_SU", display_name: "在庫数", usage_type: "alias", item_id: "item050" },
+];
+
+// ============================================================
+// 状態
+// ============================================================
+let activeCardFilter = null; // null | 'naming' | 'unaliased' | 'orphan'
+let searchQuery = "";
+
+const CARD_DEFS = [
+  { key: null, label: "総カラム数", value: () => allRows.length, clickable: false },
+  { key: "naming", label: "表記ゆれ候補", value: () => allRows.filter(r => r.is_naming_variant).length, clickable: true },
+  { key: null, label: "使用箇所(延べ)", value: () => allRows.reduce((s, r) => s + (r.usage_count || 0), 0), clickable: false },
+  { key: null, label: "カスタム項目/計算式で使用", value: () => allRows.filter(r => r.calc_names && r.calc_names.length > 0).length, clickable: false },
+  { key: "unaliased", label: "物理名そのまま", value: () => allRows.filter(r => r.is_unaliased).length, clickable: true },
+  { key: "orphan", label: "未使用カラム", value: () => allRows.filter(r => r.is_orphan).length, clickable: true },
+];
+
+function renderCards() {
+  document.getElementById('cards').innerHTML = CARD_DEFS.map(def => {
+    const selected = def.clickable && activeCardFilter === def.key;
+    const classes = ["card", def.clickable ? "" : "disabled", selected ? "selected" : ""].filter(Boolean).join(" ");
+    const hint = def.clickable ? '<span class="hint">クリックで絞込</span>' : '';
+    return `<div class="${classes}" data-key="${def.key || ''}" data-clickable="${def.clickable}">
+      <div class="label">${def.label}${hint}</div>
+      <div class="value">${def.value()}</div>
+    </div>`;
+  }).join("");
+
+  document.querySelectorAll('.card[data-clickable="true"]').forEach(el => {
+    el.addEventListener('click', () => {
+      const key = el.dataset.key;
+      activeCardFilter = (activeCardFilter === key) ? null : key;
+      renderCards();
+      renderTable();
+    });
+  });
+}
+
+function matchesCardFilter(r) {
+  if (!activeCardFilter) return true;
+  if (activeCardFilter === "naming") return r.is_naming_variant;
+  if (activeCardFilter === "unaliased") return r.is_unaliased;
+  if (activeCardFilter === "orphan") return r.is_orphan;
+  return true;
+}
+
+function matchesSearch(r) {
+  const q = searchQuery.trim().toLowerCase();
+  if (!q) return true;
+  return r.table_name.toLowerCase().includes(q) ||
+    r.column_name.toLowerCase().includes(q) ||
+    r.display_names.some(n => n.toLowerCase().includes(q)) ||
+    (r.calc_names || []).some(n => n.toLowerCase().includes(q)) ||
+    r.boards.some(b => b.toLowerCase().includes(q));
+}
+
+function renderTable() {
+  const rows = allRows.filter(r => matchesCardFilter(r) && matchesSearch(r));
+  const tbody = document.getElementById('tbody');
+  const empty = document.getElementById('empty');
+  document.getElementById('clear-filter').disabled = !activeCardFilter;
+
+  if (rows.length === 0) {
+    tbody.innerHTML = '';
+    empty.style.display = 'block';
+    return;
+  }
+  empty.style.display = 'none';
+
+  tbody.innerHTML = rows.map(r => {
+    const isWarn = !!r.is_naming_variant;
+    const isOrphan = !!r.is_orphan;
+    const calcNames = r.calc_names || [];
+    const aliasBadges = r.display_names.map(n => `<span class="badge ${isWarn ? 'warn' : ''}">${escapeHtml(n)}</span>`).join('');
+    const calcBadges = calcNames.map(n => `<span class="badge calc">${escapeHtml(n)}</span>`).join('');
+    const unaliasedBadge = r.is_unaliased ? '<span class="badge unaliased">物理名そのまま</span>' : '';
+    const boardList = r.boards.slice(0, 3).join(', ') + (r.boards.length > 3 ? ` 他${r.boards.length - 3}件` : '');
+    return `
+      <tr class="${isWarn ? 'warn' : ''} ${isOrphan ? 'orphan' : ''}">
+        <td>${escapeHtml(r.table_name)}</td>
+        <td><code>${escapeHtml(r.column_name)}</code></td>
+        <td>
+          ${aliasBadges || (calcBadges ? '' : '<span class="status-ok">-</span>')}
+          ${unaliasedBadge}
+          ${isWarn ? `<div class="status-warn">表記ゆれ ${r.alias_count}種</div>` : ''}
+          ${calcBadges ? `<div class="calc-line">カスタム項目/計算式で使用: ${calcBadges}</div>` : ''}
+          ${isOrphan ? '<div class="calc-line">未使用(MotionBoardで参照なし)</div>' : ''}
+        </td>
+        <td>${r.usage_count}件</td>
+        <td class="boards">${escapeHtml(boardList) || '-'}</td>
+      </tr>
+    `;
+  }).join('');
+}
+
+// ============================================================
+// ボード別ドリルダウン
+// ============================================================
+function initBoardSelect() {
+  const boardCounts = {};
+  boardDetails.forEach(d => { boardCounts[d.board_name] = (boardCounts[d.board_name] || 0) + 1; });
+  const boardNames = Object.keys(boardCounts).sort((a, b) => boardCounts[b] - boardCounts[a]);
+
+  const select = document.getElementById('board-select');
+  boardNames.forEach(name => {
+    const opt = document.createElement('option');
+    opt.value = name;
+    opt.textContent = `${name}（${boardCounts[name]}件）`;
+    select.appendChild(opt);
+  });
+
+  select.addEventListener('change', () => renderDrilldown(select.value));
+}
+
+function renderDrilldown(boardName) {
+  const hint = document.getElementById('drilldown-hint');
+  const table = document.getElementById('drilldown-table');
+  const tbody = document.getElementById('drilldown-tbody');
+  const countLabel = document.getElementById('drilldown-count');
+
+  if (!boardName) {
+    hint.style.display = 'block';
+    table.style.display = 'none';
+    countLabel.textContent = '';
+    return;
+  }
+
+  const rows = boardDetails.filter(d => d.board_name === boardName);
+  hint.style.display = 'none';
+  table.style.display = 'table';
+  countLabel.textContent = `${rows.length}件`;
+
+  tbody.innerHTML = rows.map(d => `
+    <tr>
+      <td>${escapeHtml(d.table_name)}</td>
+      <td><code>${escapeHtml(d.column_name)}</code></td>
+      <td>${escapeHtml(d.display_name)}</td>
+      <td><span class="badge ${d.usage_type === 'calc' ? 'calc' : ''}">${d.usage_type === 'calc' ? '計算式' : 'エイリアス'}</span></td>
+      <td>${escapeHtml(d.item_id)}</td>
+    </tr>
+  `).join('');
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+document.getElementById('search').addEventListener('input', (e) => {
+  searchQuery = e.target.value;
+  renderTable();
+});
+
+document.getElementById('clear-filter').addEventListener('click', () => {
+  activeCardFilter = null;
+  renderCards();
+  renderTable();
+});
+
+renderCards();
+renderTable();
+initBoardSelect();
+</script>
+</body>
+</html>

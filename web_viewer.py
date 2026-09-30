@@ -61,14 +61,26 @@ INDEX_HTML = """<!DOCTYPE html>
   h1 { font-size: 19px; font-weight: 600; margin: 0 0 4px; }
   .sub { color: var(--text-sub); font-size: 13px; margin: 0 0 24px; }
   .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px,1fr)); gap: 12px; margin-bottom: 24px; }
-  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
-  .card .label { font-size: 12px; color: var(--text-sub); margin-bottom: 6px; }
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px 16px; transition: border-color .15s, box-shadow .15s;
+  }
+  .card.clickable { cursor: pointer; user-select: none; }
+  .card.clickable:hover { border-color: #c7c9f5; }
+  .card.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-bg) inset; }
+  .card .label { font-size: 12px; color: var(--text-sub); margin-bottom: 6px; display: flex; align-items: center; gap: 6px; }
+  .card .label .hint { font-size: 10px; color: var(--accent); }
   .card .value { font-size: 22px; font-weight: 600; }
-  .toolbar { margin-bottom: 12px; }
-  input[type=text] {
-    width: 100%; padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px;
+  .toolbar { margin-bottom: 12px; display: flex; gap: 8px; align-items: center; }
+  .toolbar input[type=text] {
+    flex: 1; padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px;
     font-size: 13px; background: var(--surface); color: var(--text);
   }
+  .clear-filter {
+    font-size: 12px; color: var(--accent); background: var(--accent-bg); border: none;
+    border-radius: 6px; padding: 8px 12px; cursor: pointer; white-space: nowrap;
+  }
+  .clear-filter:disabled { opacity: .4; cursor: default; }
   table { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
   thead th {
     text-align: left; font-size: 12px; color: var(--text-sub); font-weight: 500;
@@ -92,6 +104,14 @@ INDEX_HTML = """<!DOCTYPE html>
   .empty { text-align: center; padding: 40px; color: var(--text-sub); }
   h2 { font-size: 15px; font-weight: 600; margin: 32px 0 10px; }
   .ratio { color: var(--text-sub); font-size: 12px; }
+
+  .drilldown-toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
+  .drilldown-toolbar select {
+    flex: 1; padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px;
+    font-size: 13px; background: var(--surface); color: var(--text);
+  }
+  .drilldown-count { font-size: 12px; color: var(--text-sub); white-space: nowrap; }
+  .drilldown-hint { text-align: center; padding: 32px; color: var(--text-sub); font-size: 13px; }
 </style>
 </head>
 <body>
@@ -102,7 +122,8 @@ INDEX_HTML = """<!DOCTYPE html>
   <div class="cards" id="cards"></div>
 
   <div class="toolbar">
-    <input type="text" id="search" placeholder="物理カラム名・テーブル名・表示名で検索">
+    <input type="text" id="search" placeholder="物理カラム名・テーブル名・表示名・ボード名で検索">
+    <button class="clear-filter" id="clear-filter" disabled>カード絞り込み解除</button>
   </div>
 
   <table>
@@ -143,40 +164,111 @@ INDEX_HTML = """<!DOCTYPE html>
     <tbody id="similar-pairs-tbody"></tbody>
   </table>
   <div id="similar-pairs-empty" class="empty" style="display:none">類似度による表記ゆれ候補は見つかりませんでした</div>
+
+  <h2>ボード別ドリルダウン</h2>
+  <div class="drilldown-toolbar">
+    <select id="board-select">
+      <option value="">ボードを選択してください</option>
+    </select>
+    <span class="drilldown-count" id="drilldown-count"></span>
+  </div>
+  <div id="drilldown-hint" class="drilldown-hint">ボードを選択すると、そのボードが使用している物理カラム→表示名の対応が一覧表示されます</div>
+  <table id="drilldown-table" style="display:none">
+    <thead>
+      <tr>
+        <th style="width:22%">テーブル/ビュー</th>
+        <th style="width:22%">物理カラム名</th>
+        <th style="width:34%">表示名</th>
+        <th style="width:12%">種別</th>
+        <th style="width:10%">アイテムID</th>
+      </tr>
+    </thead>
+    <tbody id="drilldown-tbody"></tbody>
+  </table>
 </div>
 
 <script>
 let allRows = [];
+let activeCardFilter = null; // null | 'naming' | 'unaliased' | 'orphan'
+
+const CARD_DEFS = [
+  { key: null, label: "総カラム数", value: (rows, patterns) => rows.length },
+  { key: "naming", label: "表記ゆれ候補", value: (rows) => rows.filter(r => r.is_naming_variant).length },
+  { key: null, label: "使用箇所(延べ)", value: (rows) => rows.reduce((sum, r) => sum + (r.usage_count || 0), 0) },
+  { key: null, label: "カスタム項目/計算式で使用", value: (rows) => rows.filter(r => r.calc_names && r.calc_names.length > 0).length },
+  { key: "unaliased", label: "物理名そのまま", value: (rows) => rows.filter(r => r.is_unaliased).length },
+  { key: "orphan", label: "未使用カラム", value: (rows) => rows.filter(r => r.is_orphan).length },
+  { key: null, label: "多対1候補", value: (rows, patterns) => (patterns.many_to_one || []).length },
+  { key: null, label: "類似度候補", value: (rows, patterns) => (patterns.similar_pairs || []).length },
+];
 
 async function load() {
-  const [colRes, patRes] = await Promise.all([fetch('/api/columns'), fetch('/api/patterns')]);
+  const [colRes, patRes, boardRes] = await Promise.all([
+    fetch('/api/columns'), fetch('/api/patterns'), fetch('/api/board_details'),
+  ]);
   allRows = await colRes.json();
   const patterns = await patRes.json();
+  const boardDetails = await boardRes.json();
+  lastPatterns = patterns;
   renderCards(allRows, patterns);
   renderTable(allRows);
   renderManyToOne(patterns.many_to_one || []);
   renderSimilarPairs(patterns.similar_pairs || []);
+  initBoardDrilldown(boardDetails);
 }
 
 function renderCards(rows, patterns) {
-  const totalColumns = rows.length;
-  const naming = rows.filter(r => r.is_naming_variant).length;
-  const totalUsage = rows.reduce((sum, r) => sum + (r.usage_count || 0), 0);
-  const calcUsage = rows.filter(r => r.calc_names && r.calc_names.length > 0).length;
-  const unaliasedCount = rows.filter(r => r.is_unaliased).length;
-  const orphanCount = rows.filter(r => r.is_orphan).length;
-  const manyToOneCount = (patterns.many_to_one || []).length;
-  const similarPairsCount = (patterns.similar_pairs || []).length;
-  document.getElementById('cards').innerHTML = `
-    <div class="card"><div class="label">総カラム数</div><div class="value">${totalColumns}</div></div>
-    <div class="card"><div class="label">表記ゆれ候補</div><div class="value">${naming}</div></div>
-    <div class="card"><div class="label">使用箇所(延べ)</div><div class="value">${totalUsage}</div></div>
-    <div class="card"><div class="label">カスタム項目/計算式で使用</div><div class="value">${calcUsage}</div></div>
-    <div class="card"><div class="label">物理名そのまま</div><div class="value">${unaliasedCount}</div></div>
-    <div class="card"><div class="label">未使用カラム</div><div class="value">${orphanCount}</div></div>
-    <div class="card"><div class="label">多対1候補</div><div class="value">${manyToOneCount}</div></div>
-    <div class="card"><div class="label">類似度候補</div><div class="value">${similarPairsCount}</div></div>
-  `;
+  document.getElementById('cards').innerHTML = CARD_DEFS.map(def => {
+    const clickable = !!def.key;
+    const selected = clickable && activeCardFilter === def.key;
+    const classes = ["card", clickable ? "clickable" : "", selected ? "selected" : ""].filter(Boolean).join(" ");
+    const hint = clickable ? '<span class="hint">クリックで絞込</span>' : '';
+    const a11y = clickable
+      ? `role="button" tabindex="0" aria-pressed="${selected}" aria-label="${escapeHtml(def.label)}でカラム一覧を絞り込む"`
+      : '';
+    return `<div class="${classes}" data-key="${def.key || ''}" data-clickable="${clickable}" ${a11y}>
+      <div class="label">${def.label}${hint}</div>
+      <div class="value">${def.value(rows, patterns)}</div>
+    </div>`;
+  }).join('');
+
+  document.querySelectorAll('.card[data-clickable="true"]').forEach(el => {
+    const toggle = () => {
+      const key = el.dataset.key;
+      activeCardFilter = (activeCardFilter === key) ? null : key;
+      renderCards(allRows, lastPatterns);
+      applyFilters();
+    };
+    el.addEventListener('click', toggle);
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+    });
+  });
+}
+
+let lastPatterns = {};
+
+function matchesCardFilter(r) {
+  if (!activeCardFilter) return true;
+  if (activeCardFilter === "naming") return r.is_naming_variant;
+  if (activeCardFilter === "unaliased") return r.is_unaliased;
+  if (activeCardFilter === "orphan") return r.is_orphan;
+  return true;
+}
+
+function matchesSearch(r, q) {
+  if (!q) return true;
+  return r.table_name.toLowerCase().includes(q) ||
+    r.column_name.toLowerCase().includes(q) ||
+    r.display_names.some(n => n.toLowerCase().includes(q)) ||
+    (r.calc_names || []).some(n => n.toLowerCase().includes(q)) ||
+    r.boards.some(b => b.toLowerCase().includes(q));
+}
+
+function applyFilters() {
+  const q = document.getElementById('search').value.trim().toLowerCase();
+  document.getElementById('clear-filter').disabled = !activeCardFilter;
+  renderTable(allRows.filter(r => matchesCardFilter(r) && matchesSearch(r, q)));
 }
 
 function renderTable(rows) {
@@ -261,16 +353,63 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
-document.getElementById('search').addEventListener('input', (e) => {
-  const q = e.target.value.trim().toLowerCase();
-  if (!q) { renderTable(allRows); return; }
-  const filtered = allRows.filter(r =>
-    r.table_name.toLowerCase().includes(q) ||
-    r.column_name.toLowerCase().includes(q) ||
-    r.display_names.some(n => n.toLowerCase().includes(q)) ||
-    (r.calc_names || []).some(n => n.toLowerCase().includes(q))
-  );
-  renderTable(filtered);
+// ============================================================
+// ボード別ドリルダウン
+// ============================================================
+let boardDetailsByBoard = {};
+
+function initBoardDrilldown(boardDetails) {
+  boardDetailsByBoard = {};
+  boardDetails.forEach(d => {
+    (boardDetailsByBoard[d.board_name] = boardDetailsByBoard[d.board_name] || []).push(d);
+  });
+  const boardNames = Object.keys(boardDetailsByBoard)
+    .sort((a, b) => boardDetailsByBoard[b].length - boardDetailsByBoard[a].length);
+
+  const select = document.getElementById('board-select');
+  select.innerHTML = '<option value="">ボードを選択してください</option>' +
+    boardNames.map(name =>
+      `<option value="${escapeHtml(name)}">${escapeHtml(name)}（${boardDetailsByBoard[name].length}件）</option>`
+    ).join('');
+  select.addEventListener('change', () => renderDrilldown(select.value));
+  renderDrilldown('');
+}
+
+function renderDrilldown(boardName) {
+  const hint = document.getElementById('drilldown-hint');
+  const table = document.getElementById('drilldown-table');
+  const tbody = document.getElementById('drilldown-tbody');
+  const countLabel = document.getElementById('drilldown-count');
+
+  if (!boardName) {
+    hint.style.display = 'block';
+    table.style.display = 'none';
+    countLabel.textContent = '';
+    return;
+  }
+
+  const rows = boardDetailsByBoard[boardName] || [];
+  hint.style.display = 'none';
+  table.style.display = 'table';
+  countLabel.textContent = `${rows.length}件`;
+
+  tbody.innerHTML = rows.map(d => `
+    <tr>
+      <td>${escapeHtml(d.table_name)}</td>
+      <td><code>${escapeHtml(d.column_name)}</code></td>
+      <td>${escapeHtml(d.display_name)}</td>
+      <td><span class="badge ${d.usage_type === 'calc' ? 'calc' : ''}">${d.usage_type === 'calc' ? '計算式' : 'エイリアス'}</span></td>
+      <td>${escapeHtml(d.item_id || '')}</td>
+    </tr>
+  `).join('');
+}
+
+document.getElementById('search').addEventListener('input', applyFilters);
+
+document.getElementById('clear-filter').addEventListener('click', () => {
+  activeCardFilter = null;
+  renderCards(allRows, lastPatterns);
+  applyFilters();
 });
 
 load();
@@ -345,6 +484,33 @@ def fetch_cross_column_patterns(db_path: str, whitelist: set = None, threshold: 
     }
 
 
+def fetch_board_details(db_path: str) -> list:
+    """ボード別ドリルダウン用に、aliasesの生レコード(1行1エイリアス)をboard_name単位で
+    取得する。fetch_dataはカラム単位に集計するため「このボードではどの表示名か」が
+    失われるが、こちらは集計前の対応をそのまま返す(DD-002-4)。"""
+    conn = sqlite3.connect(db_path)
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT a.board_name, c.table_name, c.column_name, a.display_name, a.usage_type, a.item_id
+        FROM aliases a
+        JOIN columns c ON c.id = a.column_id
+        ORDER BY a.board_name, c.table_name, c.column_name
+    """)
+    rows = cur.fetchall()
+    conn.close()
+    return [
+        {
+            "board_name": row[0],
+            "table_name": row[1],
+            "column_name": row[2],
+            "display_name": row[3],
+            "usage_type": row[4],
+            "item_id": row[5],
+        }
+        for row in rows
+    ]
+
+
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
@@ -363,6 +529,12 @@ class Handler(BaseHTTPRequestHandler):
                     whitelist=self.server.whitelist,
                     threshold=self.server.similarity_threshold,
                 )
+                self._send_json(data)
+            except Exception as e:
+                self._send_json({"error": str(e)}, status=500)
+        elif parsed.path == "/api/board_details":
+            try:
+                data = fetch_board_details(self.server.db_path)
                 self._send_json(data)
             except Exception as e:
                 self._send_json({"error": str(e)}, status=500)

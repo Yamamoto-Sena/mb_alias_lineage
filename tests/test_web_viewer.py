@@ -131,6 +131,36 @@ def test_fetch_cross_column_patterns_excludes_whitelisted_column(tmp_path):
     assert patterns["many_to_one"] == []
 
 
+def test_fetch_board_details_returns_flat_alias_records(tmp_path):
+    db_path = _make_db(tmp_path, [
+        (1, "T_A", "COL1", [("表示A", "board1"), ("表示B", "board2")]),
+    ])
+    details = wv.fetch_board_details(db_path)
+    assert len(details) == 2
+    board1 = next(d for d in details if d["board_name"] == "board1")
+    assert board1["table_name"] == "T_A"
+    assert board1["column_name"] == "COL1"
+    assert board1["display_name"] == "表示A"
+    assert board1["usage_type"] == "alias"
+
+
+def test_fetch_board_details_separates_calc_usage_type(tmp_path):
+    db_path = _make_db(
+        tmp_path,
+        [(1, "T_A", "COL1", [("表示A", "board1")])],
+        calc_aliases=[(1, "利益率", "board1")],
+    )
+    details = wv.fetch_board_details(db_path)
+    usage_types = {d["display_name"]: d["usage_type"] for d in details}
+    assert usage_types["表示A"] == "alias"
+    assert usage_types["利益率"] == "calc"
+
+
+def test_fetch_board_details_empty_db_returns_empty_list(tmp_path):
+    db_path = _make_db(tmp_path, [(1, "T_A", "COL1", [])])
+    assert wv.fetch_board_details(db_path) == []
+
+
 def test_warn_if_large_below_threshold_is_silent(capsys):
     wv.warn_if_large(wv.LARGE_DATASET_WARNING_THRESHOLD)
     assert capsys.readouterr().out == ""

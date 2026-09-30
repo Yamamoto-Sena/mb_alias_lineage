@@ -1,14 +1,13 @@
 """
-フェーズ2: Dr.SumからJDBC経由でテーブル/ビュー/カラムのメタデータを取得する。
+フェーズ2: Dr.SumからJDBC経由でテーブル/ビューのカラムメタデータを取得する。
 
 事前準備:
-  - Development Kitに含まれるJDBCドライバー(例: dwodsjd4.jar)を用意し、
+  - Development Kitに含まれるJDBCドライバー(dwodsjd4.jar)を用意し、
     DR_SUM_JDBC_JAR 環境変数 or --jdbc-jar オプションでパスを指定する
   - pip install -r requirements.txt (JayDeBeApi, JPype1)
 
-TODO: 実環境の接続文字列の形式（JDBC URLの書式）はDr.Sumのバージョンにより
-      異なることがあるため、DrSumConnector._build_jdbc_url() を実機の
-      マニュアルに合わせて調整してください。ここではダミーの書式にしています。
+接続方式・システムカタログはDD-002-2（doc/DD/DD-002-2_Dr.Sum実環境対応.md）で
+実機確認済みの仕様に基づく。ディストリビューター・マルチビューはスコープ外。
 """
 import argparse
 import json
@@ -16,7 +15,7 @@ import os
 import sys
 from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import List
+from typing import Dict, List
 
 
 class DrSumConnectionError(RuntimeError):
@@ -50,8 +49,7 @@ class DrSumConnector:
         self._conn = None
 
     def _build_jdbc_url(self) -> str:
-        # TODO: 実際のDr.Sum JDBC URL書式に置き換える
-        return f"jdbc:dsjdbc://{self.host}:{self.port}/{self.database}"
+        return f"jdbc:dwods:{self.host}:{self.port}:{self.database}"
 
     def connect(self):
         if not Path(self.jdbc_jar).exists():
@@ -67,7 +65,7 @@ class DrSumConnector:
                 "  → pip install -r requirements.txt を実行してください。"
             ) from e
 
-        driver_class = "jp.co.uwsc.drsum.jdbc.DsDriver"  # TODO: 正式なドライバークラス名に置換
+        driver_class = "jp.co.dw_sapporo.JDBC.JDBCDriver"
         try:
             self._conn = jaydebeapi.connect(
                 driver_class,
@@ -85,47 +83,48 @@ class DrSumConnector:
         return self._conn
 
     def fetch_columns(self) -> List[ColumnMeta]:
-        """全テーブル/ビューのカラム一覧を取得する。
+        """通常のテーブル・ビューのカラム一覧を取得する（ディストリビューター・
+        マルチビューは対象外。DD-002-2参照）。
 
-        TODO: Dr.Sumのシステムカタログ（システムビュー）の正式名称に合わせて
-              クエリを書き換える。以下は一般的なSQLメタデータ取得の書式の例。
+        `__all_tables__`には明示的な列順序（ordinal）が無いため、実機確認済みの
+        「返却順が列定義順と一致する」という前提のもと、テーブルごとに返却順で
+        ordinalを採番する。
         """
         assert self._conn is not None, "先にconnect()を呼んでください"
         cursor = self._conn.cursor()
 
+        # assortment='table'は各テーブル自体の見出し行(column_name等はNULL)であり、
+        # 実際のカラム詳細はassortment='column'側に格納されている(実機確認で判明)。
         query = """
-            SELECT
-                TABLE_NAME,
-                TABLE_TYPE,
-                COLUMN_NAME,
-                DATA_TYPE,
-                ORDINAL_POSITION
-            FROM INFORMATION_SCHEMA.COLUMNS
-            ORDER BY TABLE_NAME, ORDINAL_POSITION
-        """  # TODO: Dr.Sum固有のシステムカタログ名に置き換える
+            SELECT table_name, column_name, column_type
+            FROM __all_tables__
+            WHERE assortment = 'column'
+        """
         try:
             cursor.execute(query)
             rows = cursor.fetchall()
         except Exception as e:
             raise DrSumConnectionError(
-                "システムカタログのクエリに失敗しました。この環境のDr.Sumバージョンに\n"
-                "  合ったシステムカタログ名になっていない可能性があります。\n"
-                "  → fetch_columns() 内のSQLをTODOコメントに従って調整してください。\n"
+                "システムカタログ(__all_tables__)のクエリに失敗しました。\n"
+                "  → 実機のDr.Sumバージョンでシステムテーブル構成が異なる可能性があります。\n"
                 f"  元のエラー: {e}"
             ) from e
         finally:
             cursor.close()
 
-        return [
-            ColumnMeta(
-                table_name=row[0],
-                table_type=row[1],
-                column_name=row[2],
-                data_type=row[3],
-                ordinal=row[4],
-            )
-            for row in rows
-        ]
+        ordinal_by_table: Dict[str, int] = {}
+        columns = []
+        for table_name, column_name, column_type in rows:
+            ordinal = ordinal_by_table.get(table_name, 0) + 1
+            ordinal_by_table[table_name] = ordinal
+            columns.append(ColumnMeta(
+                table_name=table_name,
+                table_type="TABLE",
+                column_name=column_name,
+                data_type=column_type,
+                ordinal=ordinal,
+            ))
+        return columns
 
 
 def fetch_columns_stub() -> List[ColumnMeta]:

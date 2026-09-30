@@ -269,8 +269,6 @@ python board_parser.py path/to/backup/data/ --manual --out board_aliases.json
 
 ## 現時点で調整が必要な箇所（TODOコメントで明示）
 
-- `dr_sum_metadata.py` 内の接続文字列（JDBC URL書式）・ドライバークラス名・
-  システムカタログのクエリ: 実環境に合わせて要調整
 - `board_parser.py` の自動検出精度: 実ファイルで試して、誤検出が多ければ
   `_looks_like_label_key` 等のヒント文字列(`LABEL_KEY_HINTS`など)を
   実際のキー名の傾向に合わせて調整するとさらに精度が上がる

@@ -19,7 +19,10 @@ lineage.db をローカルのWebブラウザで見られるようにする軽量
 """
 import argparse
 import json
+import os
 import sqlite3
+import subprocess
+import sys
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -129,12 +132,72 @@ INDEX_HTML = """<!DOCTYPE html>
     font-size: 12px; padding: 2px 6px; border: 1px solid var(--border); border-radius: 6px;
     width: 140px; margin-left: 6px;
   }
+
+  .mode-toggle { display: flex; gap: 8px; margin-bottom: 12px; }
+  .mode-btn {
+    font-size: 12px; padding: 8px 14px; border: 1px solid var(--border); border-radius: 8px;
+    background: var(--surface); color: var(--text-sub); cursor: pointer;
+  }
+  .mode-btn.active { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
+  .upload-panel {
+    display: none; background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px 16px; margin-bottom: 20px; font-size: 13px;
+  }
+  .upload-hint { color: var(--text-sub); margin: 0 0 10px; }
+  .upload-panel input[type=file] { font-size: 12px; margin-right: 8px; }
+  .upload-panel .load-btn {
+    font-size: 12px; padding: 6px 14px; border: none; border-radius: 6px; cursor: pointer;
+    color: var(--accent); background: var(--accent-bg); margin-left: 8px;
+  }
+  #upload-status, #connect-status { margin-top: 8px; font-size: 12px; color: var(--text-sub); white-space: pre-wrap; }
+  .connect-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px,1fr)); gap: 8px 16px; margin-bottom: 10px; }
+  .connect-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-sub); }
+  .connect-form input {
+    padding: 7px 10px; border: 1px solid var(--border); border-radius: 6px;
+    font-size: 13px; background: var(--surface); color: var(--text);
+  }
 </style>
 </head>
 <body>
 <div class="wrap">
   <h1>カラム・エイリアス使用状況マップ</h1>
   <p class="sub">Dr.Sum物理カラム ⇔ MotionBoard表示名の対応関係(lineage.dbより)</p>
+
+  <div class="mode-toggle">
+    <button class="mode-btn active" id="mode-demo-btn">このデータを見る</button>
+    <button class="mode-btn" id="mode-upload-btn">実データをアップロードして見る</button>
+    <button class="mode-btn" id="mode-connect-btn">Dr.Sumに接続</button>
+  </div>
+  <div class="upload-panel" id="upload-panel">
+    <p class="upload-hint">
+      お使いの環境で<code>python main.py</code>等を実行して作成した<code>lineage.db</code>を選んでください。
+      ファイルはこのブラウザの中だけで処理され、どこにも送信されません。
+      <code>naming_whitelist.json</code>は任意です(登録内容の閲覧のみ。追加・削除はこのモードでは行えません)。
+    </p>
+    <input type="file" id="db-file-input" accept=".db">
+    <input type="file" id="whitelist-file-input" accept=".json">
+    <button class="load-btn" id="load-uploaded-btn">読み込む</button>
+    <div id="upload-status"></div>
+  </div>
+  <div class="upload-panel" id="connect-panel">
+    <p class="upload-hint">
+      Dr.Sum・MotionBoardの接続情報を入力すると、このサーバー上で<code>main.py</code>を実行して
+      <code>lineage.db</code>を作成・更新します(<code>--connect</code>オプション付きで起動した場合のみ)。
+      入力内容はこのサーバーだけで使われ、パスワードはファイルに保存されません。
+    </p>
+    <div class="connect-form">
+      <label>ホスト名 <input type="text" id="connect-host"></label>
+      <label>DB名 <input type="text" id="connect-db"></label>
+      <label>ユーザー名 <input type="text" id="connect-user"></label>
+      <label>パスワード <input type="password" id="connect-password"></label>
+      <label>JDBCドライバーのパス <input type="text" id="connect-jdbc-jar" placeholder="dwodsjd4.jar"></label>
+      <label>MotionBoardバックアップフォルダ <input type="text" id="connect-backup-dir"></label>
+      <label>ホワイトリストファイル(任意) <input type="text" id="connect-whitelist"></label>
+      <label>類似度閾値(任意、既定0.8) <input type="text" id="connect-threshold" placeholder="0.8"></label>
+    </div>
+    <button class="load-btn" id="do-connect-btn">取得</button>
+    <div id="connect-status"></div>
+  </div>
 
   <div class="cards" id="cards"></div>
 
@@ -220,8 +283,235 @@ INDEX_HTML = """<!DOCTYPE html>
 
 <script>
 let STATIC_EXPORT = false; // export_static.pyが埋め込みビルド時にtrueへ書き換える
+let UPLOADED_MODE = false; // 実データアップロードモード中はtrue(DD-006)。編集ボタンを無効化する
 let allRows = [];
 let activeCardFilter = null; // null | 'naming' | 'unaliased' | 'orphan'
+
+// ============================================================
+// 類似度アルゴリズム(difflib.SequenceMatcher.ratioの移植、DD-006)
+// tests/js/similarity.js と一字一句同じ内容に保つこと(tests/test_similarity_port.pyで保証)
+// ============================================================
+function findLongestMatch(a, b, alo, ahi, blo, bhi, b2j) {
+  let besti = alo, bestj = blo, bestsize = 0;
+  let j2len = {};
+  for (let i = alo; i < ahi; i++) {
+    const newj2len = {};
+    const indices = b2j[a[i]] || [];
+    for (const j of indices) {
+      if (j < blo) continue;
+      if (j >= bhi) break;
+      const k = (j2len[j - 1] || 0) + 1;
+      newj2len[j] = k;
+      if (k > bestsize) {
+        besti = i - k + 1;
+        bestj = j - k + 1;
+        bestsize = k;
+      }
+    }
+    j2len = newj2len;
+  }
+  return [besti, bestj, bestsize];
+}
+
+function getMatchingBlocks(a, b) {
+  const b2j = {};
+  for (let j = 0; j < b.length; j++) {
+    const c = b[j];
+    (b2j[c] = b2j[c] || []).push(j);
+  }
+  const queue = [[0, a.length, 0, b.length]];
+  const matchingBlocks = [];
+  while (queue.length) {
+    const [alo, ahi, blo, bhi] = queue.pop();
+    const [i, j, k] = findLongestMatch(a, b, alo, ahi, blo, bhi, b2j);
+    if (k) {
+      matchingBlocks.push([i, j, k]);
+      if (alo < i && blo < j) queue.push([alo, i, blo, j]);
+      if (i + k < ahi && j + k < bhi) queue.push([i + k, ahi, j + k, bhi]);
+    }
+  }
+  return matchingBlocks;
+}
+
+function sequenceMatcherRatio(a, b) {
+  const blocks = getMatchingBlocks(a, b);
+  let matches = 0;
+  for (const block of blocks) matches += block[2];
+  const total = a.length + b.length;
+  return total === 0 ? 1.0 : (2.0 * matches) / total;
+}
+
+// ============================================================
+// 実データアップロードモード用のクエリ層(web_viewer.pyのfetch_data等と同一のSQL文、DD-006)
+// ============================================================
+function normalizeText(s) {
+  return (s || "").trim().normalize("NFKC").toUpperCase();
+}
+
+function normalizeKey(tableName, columnName) {
+  return normalizeText(tableName) + "\\u0000" + normalizeText(columnName);
+}
+
+function jsFetchData(db, whitelistSet) {
+  const res = db.exec(`
+    SELECT c.id, c.table_name, c.column_name,
+           GROUP_CONCAT(DISTINCT CASE WHEN a.usage_type='alias' THEN a.display_name END) AS display_names,
+           GROUP_CONCAT(DISTINCT CASE WHEN a.usage_type='calc' THEN a.display_name END) AS calc_names,
+           COUNT(DISTINCT CASE WHEN a.usage_type='alias' THEN a.display_name END) AS alias_count,
+           COUNT(a.id) AS usage_count,
+           GROUP_CONCAT(DISTINCT a.board_name) AS boards
+    FROM columns c
+    LEFT JOIN aliases a ON a.column_id = c.id
+    GROUP BY c.id
+    ORDER BY alias_count DESC, c.table_name, c.column_name
+  `);
+  if (!res.length) return [];
+  return res[0].values.map(row => {
+    const [id, table_name, column_name, displayNamesRaw, calcNamesRaw, aliasCount, usageCount, boardsRaw] = row;
+    const display_names = displayNamesRaw ? displayNamesRaw.split(",") : [];
+    const isWhitelisted = whitelistSet.has(normalizeKey(table_name, column_name));
+    return {
+      id, table_name, column_name, display_names,
+      calc_names: calcNamesRaw ? calcNamesRaw.split(",") : [],
+      alias_count: aliasCount || 0,
+      usage_count: usageCount || 0,
+      boards: boardsRaw ? boardsRaw.split(",") : [],
+      is_unaliased: display_names.some(n => normalizeText(column_name) === normalizeText(n)),
+      is_orphan: (usageCount || 0) === 0,
+      is_naming_variant: (aliasCount || 0) > 1 && !isWhitelisted,
+    };
+  });
+}
+
+function jsFindManyToOne(db, whitelistSet) {
+  const res = db.exec(`
+    SELECT a.display_name, c.table_name, c.column_name
+    FROM aliases a
+    JOIN columns c ON c.id = a.column_id
+    WHERE a.usage_type = 'alias'
+  `);
+  const byDisplayName = new Map();
+  if (res.length) {
+    for (const [display_name, table_name, column_name] of res[0].values) {
+      if (whitelistSet.has(normalizeKey(table_name, column_name))) continue;
+      if (!byDisplayName.has(display_name)) byDisplayName.set(display_name, new Map());
+      byDisplayName.get(display_name).set(`${table_name}\\u0000${column_name}`, { table_name, column_name });
+    }
+  }
+  const results = [];
+  for (const [display_name, cols] of byDisplayName) {
+    if (cols.size > 1) results.push({ display_name, columns: Array.from(cols.values()) });
+  }
+  return results;
+}
+
+function jsFindSimilarPairs(db, whitelistSet, threshold) {
+  const res = db.exec(`
+    SELECT DISTINCT c.id, c.table_name, c.column_name, a.display_name
+    FROM aliases a
+    JOIN columns c ON c.id = a.column_id
+    WHERE a.usage_type = 'alias'
+  `);
+  if (!res.length) return [];
+  const entries = res[0].values
+    .filter(([, table_name, column_name]) => !whitelistSet.has(normalizeKey(table_name, column_name)))
+    .map(([column_id, table_name, column_name, display_name]) => ({ column_id, table_name, column_name, display_name }));
+
+  const results = [];
+  for (let i = 0; i < entries.length; i++) {
+    for (let j = i + 1; j < entries.length; j++) {
+      const a = entries[i], b = entries[j];
+      if (a.column_id === b.column_id) continue;
+      const ratio = sequenceMatcherRatio(a.display_name, b.display_name);
+      if (ratio >= threshold) {
+        results.push({
+          column_a: { table_name: a.table_name, column_name: a.column_name, display_name: a.display_name },
+          column_b: { table_name: b.table_name, column_name: b.column_name, display_name: b.display_name },
+          ratio,
+        });
+      }
+    }
+  }
+  return results;
+}
+
+function jsFetchCrossColumnPatterns(db, whitelistSet, threshold) {
+  return {
+    many_to_one: jsFindManyToOne(db, whitelistSet),
+    similar_pairs: jsFindSimilarPairs(db, whitelistSet, threshold),
+  };
+}
+
+function jsFetchBoardDetails(db) {
+  const res = db.exec(`
+    SELECT a.board_name, c.table_name, c.column_name, a.display_name, a.usage_type, a.item_id
+    FROM aliases a
+    JOIN columns c ON c.id = a.column_id
+    ORDER BY a.board_name, c.table_name, c.column_name
+  `);
+  if (!res.length) return [];
+  return res[0].values.map(([board_name, table_name, column_name, display_name, usage_type, item_id]) => ({
+    board_name, table_name, column_name, display_name, usage_type, item_id,
+  }));
+}
+
+let sqlJsPromise = null;
+function loadSqlJs() {
+  if (!sqlJsPromise) {
+    const SQLJS_BASE = "https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.14.1/";
+    sqlJsPromise = new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = SQLJS_BASE + "sql-wasm.js";
+      script.onload = () => {
+        initSqlJs({ locateFile: f => SQLJS_BASE + f }).then(resolve, reject);
+      };
+      script.onerror = () => reject(new Error("sql.jsの読み込みに失敗しました(ネットワーク接続を確認してください)"));
+      document.head.appendChild(script);
+    });
+  }
+  return sqlJsPromise;
+}
+
+async function handleLoadUploaded() {
+  const dbFile = document.getElementById("db-file-input").files[0];
+  const wlFile = document.getElementById("whitelist-file-input").files[0];
+  const statusEl = document.getElementById("upload-status");
+  if (!dbFile) {
+    statusEl.textContent = "lineage.dbファイルを選択してください";
+    return;
+  }
+  statusEl.textContent = "読み込み中...";
+  try {
+    const SQL = await loadSqlJs();
+    const buf = await dbFile.arrayBuffer();
+    const db = new SQL.Database(new Uint8Array(buf));
+
+    let whitelistEntries = [];
+    if (wlFile) {
+      const parsed = JSON.parse(await wlFile.text());
+      whitelistEntries = parsed.excluded_columns || [];
+    }
+    const whitelistSet = new Set(
+      whitelistEntries.map(e => normalizeKey(e.table_name, e.column_name))
+    );
+
+    UPLOADED_MODE = true;
+    allRows = jsFetchData(db, whitelistSet);
+    const patterns = jsFetchCrossColumnPatterns(db, whitelistSet, 0.8);
+    const boardDetails = jsFetchBoardDetails(db);
+    lastPatterns = patterns;
+    renderCards(allRows, patterns);
+    renderTable(allRows);
+    renderManyToOne(patterns.many_to_one || []);
+    renderSimilarPairs(patterns.similar_pairs || []);
+    renderWhitelist(whitelistEntries);
+    initBoardDrilldown(boardDetails);
+    db.close();
+    statusEl.textContent = `読み込み完了(${allRows.length}カラム)`;
+  } catch (err) {
+    statusEl.textContent = "エラー: " + err.message;
+  }
+}
 
 const CARD_DEFS = [
   { key: null, label: "総カラム数", value: (rows, patterns) => rows.length },
@@ -238,10 +528,17 @@ async function load() {
   const [colRes, patRes, boardRes, whitelistRes] = await Promise.all([
     fetch('/api/columns'), fetch('/api/patterns'), fetch('/api/board_details'), fetch('/api/whitelist'),
   ]);
-  allRows = await colRes.json();
-  const patterns = await patRes.json();
-  const boardDetails = await boardRes.json();
-  const whitelistEntries = await whitelistRes.json();
+  let colData = await colRes.json();
+  let patterns = await patRes.json();
+  let boardDetails = await boardRes.json();
+  let whitelistEntries = await whitelistRes.json();
+  // lineage.dbがまだ存在しない場合(DD-007の--connect起動直後)、各APIは
+  // {"error": ...}を返す。配列/オブジェクトでない値はレンダリング関数を壊すため空にする
+  if (!Array.isArray(colData)) colData = [];
+  if (!patterns || typeof patterns !== 'object' || Array.isArray(patterns)) patterns = {};
+  if (!Array.isArray(boardDetails)) boardDetails = [];
+  if (!Array.isArray(whitelistEntries)) whitelistEntries = [];
+  allRows = colData;
   lastPatterns = patterns;
   renderCards(allRows, patterns);
   renderTable(allRows);
@@ -252,7 +549,7 @@ async function load() {
 }
 
 function whitelistAddButton(tableName, columnName) {
-  if (STATIC_EXPORT) return '';
+  if (STATIC_EXPORT || UPLOADED_MODE) return '';
   return `<span class="wl-add" data-table="${escapeHtml(tableName)}" data-column="${escapeHtml(columnName)}">${wlButtonHtml()}</span>`;
 }
 
@@ -424,7 +721,7 @@ function renderWhitelist(entries) {
       <td>${escapeHtml(e.table_name)}</td>
       <td><code>${escapeHtml(e.column_name)}</code></td>
       <td>${escapeHtml(e.reason || '')}</td>
-      <td>${STATIC_EXPORT ? '' : `<button class="wl-remove-btn" data-table="${escapeHtml(e.table_name)}" data-column="${escapeHtml(e.column_name)}">削除</button>`}</td>
+      <td>${(STATIC_EXPORT || UPLOADED_MODE) ? '' : `<button class="wl-remove-btn" data-table="${escapeHtml(e.table_name)}" data-column="${escapeHtml(e.column_name)}">削除</button>`}</td>
     </tr>
   `).join('');
 }
@@ -529,6 +826,67 @@ document.body.addEventListener('keydown', async (e) => {
   e.preventDefault();
   await submitWhitelistAdd(e.target.closest('.wl-add'));
 });
+
+function setActiveMode(activeBtnId) {
+  ['mode-demo-btn', 'mode-upload-btn', 'mode-connect-btn'].forEach(id => {
+    document.getElementById(id).classList.toggle('active', id === activeBtnId);
+  });
+  document.getElementById('upload-panel').style.display = activeBtnId === 'mode-upload-btn' ? 'block' : 'none';
+  document.getElementById('connect-panel').style.display = activeBtnId === 'mode-connect-btn' ? 'block' : 'none';
+}
+
+document.getElementById('mode-upload-btn').addEventListener('click', () => {
+  setActiveMode('mode-upload-btn');
+});
+
+document.getElementById('mode-connect-btn').addEventListener('click', () => {
+  setActiveMode('mode-connect-btn');
+});
+
+document.getElementById('mode-demo-btn').addEventListener('click', () => {
+  setActiveMode('mode-demo-btn');
+  document.getElementById('upload-status').textContent = '';
+  UPLOADED_MODE = false;
+  load();
+});
+
+document.getElementById('load-uploaded-btn').addEventListener('click', handleLoadUploaded);
+
+document.getElementById('do-connect-btn').addEventListener('click', async () => {
+  const statusEl = document.getElementById('connect-status');
+  const body = {
+    host: document.getElementById('connect-host').value.trim(),
+    db: document.getElementById('connect-db').value.trim(),
+    user: document.getElementById('connect-user').value.trim(),
+    password: document.getElementById('connect-password').value,
+    jdbc_jar: document.getElementById('connect-jdbc-jar').value.trim(),
+    backup_dir: document.getElementById('connect-backup-dir').value.trim(),
+    whitelist: document.getElementById('connect-whitelist').value.trim(),
+    similarity_threshold: document.getElementById('connect-threshold').value.trim(),
+  };
+  statusEl.textContent = '取得中...(Dr.Sumサーバー・MotionBoardフォルダの規模によっては時間がかかります)';
+  try {
+    const res = await fetch('/api/connect', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      statusEl.textContent = 'エラー: ' + (data.error || `HTTP ${res.status}`);
+      return;
+    }
+    statusEl.textContent = '取得完了。画面を更新します...';
+    setActiveMode('mode-demo-btn');
+    await load();
+  } catch (err) {
+    statusEl.textContent = 'エラー: ' + err.message;
+  }
+});
+
+if (STATIC_EXPORT) {
+  document.getElementById('mode-connect-btn').style.display = 'none';
+}
 
 load();
 </script>
@@ -678,6 +1036,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_whitelist_add(body)
         elif parsed.path == "/api/whitelist/delete":
             self._handle_whitelist_delete(body)
+        elif parsed.path == "/api/connect":
+            self._handle_connect(body)
         else:
             self.send_response(404)
             self.end_headers()
@@ -726,6 +1086,52 @@ class Handler(BaseHTTPRequestHandler):
         }
         self._send_json({"ok": True, "entries": entries})
 
+    def _handle_connect(self, body: dict) -> None:
+        """DD-007: 画面からDr.Sum接続情報を受け取り、main.pyを実行してlineage.dbを更新する。
+
+        --connect未指定時は無効(403)。パスワードはコマンドライン引数に乗せず、
+        main.pyを起動するsubprocessの環境変数(DR_SUM_PASSWORD)経由で渡す
+        (dr_sum_metadata.pyが既に読むフォールバック。プロセス一覧に平文表示されないようにするため)。
+        """
+        if not getattr(self.server, "connect_enabled", False):
+            self._send_json(
+                {"error": "この機能は無効です。--connect オプション付きで起動してください。"},
+                status=403,
+            )
+            return
+
+        required = ["host", "db", "user", "jdbc_jar", "backup_dir"]
+        missing = [k for k in required if not str(body.get(k) or "").strip()]
+        if missing:
+            self._send_json({"error": f"必須項目が未入力です: {', '.join(missing)}"}, status=400)
+            return
+
+        cmd = [
+            sys.executable, "main.py",
+            "--backup-dir", body["backup_dir"],
+            "--host", body["host"],
+            "--db", body["db"],
+            "--user", body["user"],
+            "--jdbc-jar", body["jdbc_jar"],
+        ]
+        if body.get("whitelist"):
+            cmd += ["--whitelist", body["whitelist"]]
+        if body.get("similarity_threshold"):
+            cmd += ["--similarity-threshold", str(body["similarity_threshold"])]
+
+        env = dict(os.environ)
+        if body.get("password"):
+            env["DR_SUM_PASSWORD"] = body["password"]
+
+        result = subprocess.run(cmd, capture_output=True, text=True, env=env)
+        if result.returncode != 0:
+            self._send_json(
+                {"error": (result.stdout + "\n" + result.stderr).strip() or "main.pyの実行に失敗しました"},
+                status=500,
+            )
+            return
+        self._send_json({"ok": True, "output": result.stdout})
+
     def _send_html(self, html: str) -> None:
         body = html.encode("utf-8")
         self.send_response(200)
@@ -756,11 +1162,15 @@ def main() -> None:
                                              "ファイルが無くても画面からの追加操作で新規作成される)")
     parser.add_argument("--similarity-threshold", type=float, default=0.8,
                          help="類似度による表記ゆれ候補の閾値(0〜1、デフォルト0.8)")
+    parser.add_argument("--connect", action="store_true",
+                         help="画面の「Dr.Sumに接続」フォームからmain.pyを実行してlineage.dbを"
+                              "作成・更新できるようにする(DD-007)。既定では無効")
     args = parser.parse_args()
 
-    if not Path(args.db).exists():
+    if not Path(args.db).exists() and not args.connect:
         print(f"エラー: {args.db} が見つかりません。")
-        print("先に match_aliases.py を実行して lineage.db を作成してください。")
+        print("先に match_aliases.py を実行して lineage.db を作成するか、"
+              "--connect オプションを付けて起動してください。")
         return
 
     # --whitelistを明示指定した場合はtypo検知のため実在確認する。未指定時は既定パスを使い、
@@ -771,9 +1181,12 @@ def main() -> None:
     whitelist_path = args.whitelist or DEFAULT_WHITELIST_PATH
     whitelist = load_whitelist(whitelist_path) if Path(whitelist_path).exists() else set()
 
-    with sqlite3.connect(args.db) as conn:
-        row_count = conn.execute("SELECT COUNT(*) FROM columns").fetchone()[0]
-    warn_if_large(row_count)
+    if Path(args.db).exists():
+        with sqlite3.connect(args.db) as conn:
+            row_count = conn.execute("SELECT COUNT(*) FROM columns").fetchone()[0]
+        warn_if_large(row_count)
+    else:
+        print(f"※ {args.db} がまだ存在しません。画面の「Dr.Sumに接続」から作成してください。")
 
     # 1リクエストずつしか処理できないHTTPServerだと、Promise.allで/api/columnsと
     # /api/patternsを並行取得する際にKeep-Alive接続待ちでハングすることがあるため、
@@ -783,6 +1196,7 @@ def main() -> None:
     server.whitelist = whitelist
     server.whitelist_path = whitelist_path
     server.similarity_threshold = args.similarity_threshold
+    server.connect_enabled = args.connect
     url = f"http://localhost:{args.port}"
     print(f"サーバーを起動しました: {url}")
     print("終了するには Ctrl+C を押してください")

@@ -59,10 +59,17 @@ def build_static_html(db_path: str, whitelist: set = None, whitelist_entries: li
   const [colRes, patRes, boardRes, whitelistRes] = await Promise.all([
     fetch('/api/columns'), fetch('/api/patterns'), fetch('/api/board_details'), fetch('/api/whitelist'),
   ]);
-  allRows = await colRes.json();
-  const patterns = await patRes.json();
-  const boardDetails = await boardRes.json();
-  const whitelistEntries = await whitelistRes.json();
+  let colData = await colRes.json();
+  let patterns = await patRes.json();
+  let boardDetails = await boardRes.json();
+  let whitelistEntries = await whitelistRes.json();
+  // lineage.dbがまだ存在しない場合(DD-007の--connect起動直後)、各APIは
+  // {"error": ...}を返す。配列/オブジェクトでない値はレンダリング関数を壊すため空にする
+  if (!Array.isArray(colData)) colData = [];
+  if (!patterns || typeof patterns !== 'object' || Array.isArray(patterns)) patterns = {};
+  if (!Array.isArray(boardDetails)) boardDetails = [];
+  if (!Array.isArray(whitelistEntries)) whitelistEntries = [];
+  allRows = colData;
   lastPatterns = patterns;
   renderCards(allRows, patterns);
   renderTable(allRows);

@@ -103,3 +103,7 @@ README記載のタスクスケジューラ手動運用のみで実行履歴が�
 - Phase 4（ガバナンス文書整備）完了: `doc/operation/operations.md`を新設、`doc/DOC-MAP.md`を更新
 - 全回帰実施: `pytest`131件パス、`doc-check.sh` OK。受け入れ基準1〜4すべて達成
 - DD完了。子DD一覧（DD-002本体）を更新し、DD-INDEX.mdを再生成
+- （アーカイブ後の追補）push後にActionsで実行を確認したところ、`actions/checkout@v4`/
+  `actions/setup-python@v5`がNode.js 20非推奨警告を出していたため、`v7`（Node 24ネイティブ）に
+  更新（コミット`2b104f2`）。再実行でpytest 131件パス・警告解消を確認。ステータスは軽微な
+  設定変更のため「完了」のまま維持

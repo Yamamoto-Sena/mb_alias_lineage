@@ -7,6 +7,10 @@ Dr.Sum上の物理カラムが、MotionBoard上でどんな別名（エイリア
 動くように、自動検出モードをデフォルトにしてあります。**
 （Dr.Sumの実カラム名一覧を手がかりに、ファイルの中から既知のカラム名が
 出現する場所を総当たりで探すヒューリスティック方式）
+渡すフォルダは、エクスポート済みのXML/JSON一式でも、MotionBoardサーバーの内部データ
+フォルダ（`<ボード名>.fs-file/`を含むフォルダ。`data/mb/mbds_def/mbDef/`配下等）を
+そのまま指定してもよい（DD-002-3で対応。実データソース定義`<DataSource type="drsum">`
+は専用ロジックで解析する）。
 
 ## 構成
 
@@ -269,11 +273,14 @@ python board_parser.py path/to/backup/data/ --manual --out board_aliases.json
 
 ## 現時点で調整が必要な箇所（TODOコメントで明示）
 
-- `board_parser.py` の自動検出精度: 実ファイルで試して、誤検出が多ければ
-  `_looks_like_label_key` 等のヒント文字列(`LABEL_KEY_HINTS`など)を
-  実際のキー名の傾向に合わせて調整するとさらに精度が上がる
-- `board_parser.py` のカスタム項目・事後計算項目の計算式検出精度: 実ファイルの
-  キー名の傾向に合わせて`FORMULA_KEY_HINTS`を調整する。計算式の演算子ヒント
-  (`_FORMULA_OPERATOR_RE`)も、実際の計算式の書き方（角括弧を使わない等）に
-  応じて見直すとよい
+- `board_parser.py` の自動検出精度: MotionBoardの実データソース定義
+  （`<DataSource type="drsum">`、Dr.Sum接続ボード）は専用の抽出ロジック
+  （`_parse_drsum_datasource`）で対応済み（DD-002-3、実機確認済み）。それ以外の
+  形式（手動エクスポート・他製品連携等）で誤検出が多い場合は、引き続き
+  `_looks_like_label_key` 等のヒント文字列(`LABEL_KEY_HINTS`など)を実際のキー名の
+  傾向に合わせて調整する
+- `board_parser.py` のカスタム項目・事後計算項目の計算式検出精度: Dr.Sum接続ボードの
+  計算項目（`<ExField>`、`fid`による構造参照）はDD-002-3で対応済み。計算式が文字列
+  として埋め込まれる形式（`FORMULA_KEY_HINTS`/`_FORMULA_OPERATOR_RE`が対象とする形式）
+  で誤検出が多い場合は、実際のキー名・演算子の書き方に合わせて調整する
 - `db_schema.sql`: 実データを見て型やインデックスを調整

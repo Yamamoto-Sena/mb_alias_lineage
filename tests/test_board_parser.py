@@ -1,4 +1,6 @@
+import io
 import json
+import zipfile
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
@@ -327,3 +329,120 @@ class TestAutoParseXmlDoesNotCrashOnBadFiles:
     def test_undecodable_declared_encoding_returns_empty_list(self):
         content = b'<?xml version="1.0" encoding="not-a-real-encoding"?><Board name="x"/>'
         assert bp.auto_parse_xml("broken.xml", content, load_index()) == []
+
+
+# ============================================================
+# DD-002-3: MotionBoardの実データソース定義(<DataSource type="drsum">)専用ロジック
+# ============================================================
+# 実機確認で得た構造を模した合成XML(実ファイルはコミットしない)。列名・ボード名は
+# 架空のものに置き換えてある。
+DRSUM_DATASOURCE_XML = """<?xml version="1.0" ?>
+<DataSource name="テストデータソース" type="drsum" comId="Dr.Sum"
+            src="Test/T_SAMPLE" dispSrc="Dr.Sum/Test/T_SAMPLE" srcName="T_SAMPLE" version="4.0.1">
+  <Layout>
+    <Field>
+      <Item id="1" fid="1" title="product_code" aliasTitle="" type="VARCHAR" disp="true"/>
+      <Item id="2" fid="2" title="sale_date" aliasTitle="" type="DATE" disp="true"/>
+      <Item id="3" fid="3" title="amount" aliasTitle="売上金額" type="NUMBER" disp="true"/>
+    </Field>
+    <ExField>
+      <Item id="1" fid="10000" title="販売年月" aliasTitle="" type="VARCHAR" exType="DATE_GROUPING" disp="false">
+        <DateGroups dateType="DATE" targetItemFid="2" format="yyyy/MM"/>
+      </Item>
+      <Item id="2" fid="10001" title="未解決の計算項目" aliasTitle="" type="VARCHAR" exType="DATE_GROUPING" disp="false">
+        <DateGroups dateType="DATE" targetItemFid="0" format="yyyy/MM"/>
+      </Item>
+    </ExField>
+  </Layout>
+</DataSource>
+"""
+
+
+class TestDrSumDataSourceFormat:
+    def _parse(self):
+        return bp.auto_parse_xml("ds.xml", DRSUM_DATASOURCE_XML.encode("utf-8"), load_index())
+
+    def test_table_name_from_src_name_attribute(self):
+        records = self._parse()
+        assert all(r.table_name == "T_SAMPLE" for r in records)
+
+    def test_empty_alias_title_uses_physical_name_as_display_name(self):
+        r = find(self._parse(), "テストデータソース", "1", "PRODUCT_CODE")
+        assert r.display_name == "product_code"
+        assert r.usage_type == "alias"
+
+    def test_non_empty_alias_title_is_used_as_display_name(self):
+        r = find(self._parse(), "テストデータソース", "3", "AMOUNT")
+        assert r.display_name == "売上金額"
+
+    def test_exfield_resolves_target_fid_to_source_column(self):
+        records = self._parse()
+        matches = [r for r in records if r.column_name == "SALE_DATE" and r.usage_type == "calc"]
+        assert len(matches) == 1
+        assert matches[0].display_name == "販売年月"
+
+    def test_exfield_with_unresolvable_target_fid_is_skipped(self):
+        records = self._parse()
+        assert not any(r.display_name == "未解決の計算項目" for r in records)
+
+    def test_root_without_srcname_returns_empty(self):
+        content = ('<?xml version="1.0" ?><DataSource name="x" type="drsum" '
+                   'src="" srcName="" version="4.0.1"><Layout></Layout></DataSource>')
+        assert bp.auto_parse_xml("ds.xml", content.encode("utf-8"), load_index()) == []
+
+    def test_non_drsum_datasource_falls_back_to_generic_logic(self):
+        # type="drsum"以外は専用パスに分岐させない(専用パスなら<Layout>が無く空リストになるはず)。
+        # 汎用ロジックが働けば、属性値の完全一致+同一要素内ラベル探索で1件検出される。
+        content = ('<?xml version="1.0" ?><DataSource name="x" type="other" srcName="T_SAMPLE">'
+                   '<Field column="TANKA" label="単価"/></DataSource>')
+        records = bp.auto_parse_xml("ds.xml", content.encode("utf-8"), load_index())
+        assert len(records) == 1
+        assert records[0].display_name == "単価"
+
+
+# ============================================================
+# DD-002-3: MotionBoardサーバー内部コンテンツストア(.fs-file/fs-snap)の走査
+# ============================================================
+def _build_zip_bytes(entries: dict) -> bytes:
+    """{エントリ名: 中身(bytes)} からZIPバイト列を作る。"""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        for name, content in entries.items():
+            zf.writestr(name, content)
+    return buf.getvalue()
+
+
+class TestNestedZipAndFsFileDiscovery:
+    def test_nested_zip_entry_is_parsed_recursively(self):
+        index = load_index()
+        inner_zip = _build_zip_bytes({
+            "mbds_def/dsDef/日本語データソース": DRSUM_DATASOURCE_XML.encode("utf-8"),
+        })
+        outer_zip = _build_zip_bytes({
+            "board_body": b"<?xml version=\"1.0\" ?><BoardDefinition/>",
+            "fs-xcabinets/0": inner_zip,
+        })
+        records = bp._parse_zip_bytes(outer_zip, index, "outer.zip", "outer.zip")
+        assert any(r.table_name == "T_SAMPLE" for r in records)
+
+    def test_extensionless_xml_entry_is_sniffed_by_content(self):
+        index = load_index()
+        zip_bytes = _build_zip_bytes({"Test1_BOARD": DRSUM_DATASOURCE_XML.encode("utf-8")})
+        records = bp._parse_zip_bytes(zip_bytes, index, "b.zip", "b.zip")
+        assert any(r.table_name == "T_SAMPLE" for r in records)
+
+    def test_fs_file_snapshot_is_discovered_and_parsed(self, tmp_path):
+        board_dir = tmp_path / "MyBoard.fs-file"
+        snap_dir = board_dir / "fs-snap"
+        snap_dir.mkdir(parents=True)
+        zip_bytes = _build_zip_bytes({"MyBoard": DRSUM_DATASOURCE_XML.encode("utf-8")})
+        (snap_dir / "snap_00000001_1000").write_bytes(_build_zip_bytes({"MyBoard": b"<?xml version=\"1.0\" ?><Old/>"}))
+        (snap_dir / "snap_00000002_2000").write_bytes(zip_bytes)
+
+        records = bp.auto_parse_all(tmp_path, str(COLUMNS_PATH))
+        assert any(r.table_name == "T_SAMPLE" for r in records)
+
+    def test_fs_file_without_snapshot_does_not_crash(self, tmp_path):
+        board_dir = tmp_path / "Empty.fs-file"
+        (board_dir / "fs-snap").mkdir(parents=True)
+        assert bp.auto_parse_all(tmp_path, str(COLUMNS_PATH)) == []

@@ -21,6 +21,13 @@
   以前からある、TAG_CONFIGでタグ名を明示的に指定する方式。
   自動検出の精度が低い場合のフォールバックとして残してある。
 
+■ MotionBoardの実データソース定義（<DataSource type="drsum">）
+  実機確認（DD-002-3）で判明した、汎用ヒューリスティックとは異なる専用形式。
+  srcName属性からテーブル名を直接取得し、<Field>（物理カラム）はaliasTitleの
+  有無で表示名を決定、<ExField>（計算項目）はfidによる構造参照を解決してlineageを
+  繋ぐ（_parse_drsum_datasource）。また、MotionBoardサーバーの内部コンテンツストア
+  （<ボード名>.fs-file/fs-snap/snap_*、拡張子なしの入れ子ZIP構造）も直接走査できる。
+
 使い方:
     # 自動検出モード（推奨・デフォルト）
     python board_parser.py <ボード定義フォルダ> --columns dr_sum_columns.json --out board_aliases.json
@@ -32,6 +39,7 @@
     python board_parser.py --stub --out board_aliases.json
 """
 import argparse
+import io
 import json
 import re
 import zipfile
@@ -204,6 +212,89 @@ def _find_columns_in_formula(index: ColumnIndex, value: str) -> List[str]:
 
 
 # ============================================================
+# MotionBoardの実データソース定義(<DataSource type="drsum">)専用の抽出
+# ============================================================
+# 実機確認(DD-002-3、2026-09-30)で判明: MotionBoardの実際のデータソース定義ファイルは
+# 「1要素=1フィールド、title(物理カラム名)/aliasTitle(表示名上書き。未設定なら空文字)/
+# fid(フィールドID)等の属性がフラットに同居する」形式であり、下の汎用ロジック(属性値の
+# 完全一致→同一要素内の別属性からラベル候補を探す)は前提が異なり機能しない
+# (ラベルが見つからず無関係な属性値を誤ってラベルとして採用してしまう)。
+# `srcName`属性がテーブル名そのものを正確に示すため、`ColumnIndex`によるテーブル名の
+# 推測も不要。計算項目(ExField)は元カラムを計算式の文字列ではなく`fid`で構造的に参照する。
+def _parse_drsum_datasource(root: ET.Element, source_file: str) -> List[AliasRecord]:
+    table_name = root.attrib.get("srcName", "").strip()
+    if not table_name:
+        return []
+    board_name = root.attrib.get("name", "").strip() or table_name
+
+    layout = root.find("Layout")
+    if layout is None:
+        return []
+
+    records: List[AliasRecord] = []
+    fid_to_title: Dict[str, str] = {}
+
+    field_container = layout.find("Field")
+    if field_container is not None:
+        for item in field_container.findall("Item"):
+            title = item.attrib.get("title", "").strip()
+            if not title:
+                continue
+            fid = item.attrib.get("fid", "").strip()
+            if fid:
+                fid_to_title[fid] = title
+            alias_title = item.attrib.get("aliasTitle", "").strip()
+            # aliasTitleが空 = 物理名をそのまま表示に使っている状態
+            # (DD-002-1の「物理名直接使用」パターン)。display_nameに物理名自身を入れて
+            # おくことで、既存のfind_unaliased_columns側の正規化比較にそのまま乗る。
+            records.append(AliasRecord(
+                table_name=table_name,
+                column_name=title.upper(),
+                display_name=alias_title or title,
+                board_name=board_name,
+                item_id=item.attrib.get("id", ""),
+                source_file=source_file,
+            ))
+
+    exfield_container = layout.find("ExField")
+    if exfield_container is not None:
+        for item in exfield_container.findall("Item"):
+            calc_title = item.attrib.get("title", "").strip()
+            if not calc_title:
+                continue
+            for target_fid in _exfield_target_fids(item):
+                source_title = fid_to_title.get(target_fid)
+                if source_title:
+                    records.append(AliasRecord(
+                        table_name=table_name,
+                        column_name=source_title.upper(),
+                        display_name=calc_title,
+                        board_name=board_name,
+                        item_id=item.attrib.get("id", ""),
+                        source_file=source_file,
+                        usage_type="calc",
+                    ))
+                # 参照元fidが解決できない計算項目(元カラムが同一データソース内に無い等)は
+                # 記録しない(既知の制約。孤立項目判定への影響はない=計算項目自体は
+                # find_orphan_columnsの対象外のため)
+    return records
+
+
+def _exfield_target_fids(item: ET.Element) -> List[str]:
+    """計算項目(ExField)の子要素(DateGroups等)が持つtargetItemFid属性から、参照して
+    いる元カラムのfidを重複なく集める。"0"は「未設定」を表す値のため対象外とする
+    (Interpolation等の未使用項目にも既定値として現れるため)。"""
+    seen = set()
+    fids: List[str] = []
+    for child in item.iter():
+        target = child.attrib.get("targetItemFid", "").strip()
+        if target and target != "0" and target not in seen:
+            seen.add(target)
+            fids.append(target)
+    return fids
+
+
+# ============================================================
 # 自動検出モード: XML
 # ============================================================
 def auto_parse_xml(source_name: str, content: bytes, index: ColumnIndex,
@@ -219,6 +310,13 @@ def auto_parse_xml(source_name: str, content: bytes, index: ColumnIndex,
         return []
 
     source_file = source_file or source_name
+
+    if _local_tag(root.tag) == "DataSource" and root.attrib.get("type") == "drsum":
+        # 実機確認(DD-002-3)により、MotionBoardの実データソース定義は下の汎用ロジック
+        # (属性値の完全一致 + 同一要素内のラベル探索)が想定する構造と異なると判明した
+        # ため、専用の抽出関数に委譲する(index引数はこの形式では使用しない)。
+        return _parse_drsum_datasource(root, source_file)
+
     records: List[AliasRecord] = []
 
     def find_label_on_element(el: ET.Element, matched_key: Optional[str], matched_val: str) -> Optional[str]:
@@ -459,33 +557,80 @@ def auto_parse_json(source_name: str, content: bytes, index: ColumnIndex,
     return records
 
 
-def _auto_parse_zip(zip_path: Path, index: ColumnIndex,
-                     source_file: Optional[str] = None) -> List[AliasRecord]:
-    """ZIP内のXML/JSONエントリを、展開せずメモリ上で直接解析する。"""
-    records: List[AliasRecord] = []
-    zip_source_file = source_file or zip_path.name
+def _decode_zip_entry_name(raw_name: str) -> str:
+    """ZIP内エントリ名の文字化け対策。MotionBoardの内部コンテンツストア(`fs-snap`配下の
+    入れ子ZIP等)はUTF-8フラグを立てずに日本語名を格納しており、Pythonの`zipfile`は
+    既定でCP437としてデコードするため文字化けする。CP437の生バイト列に戻し、
+    UTF-8→Shift_JISの順で再デコードを試みる(実機確認DD-002-3で確認した実際の構成)。"""
     try:
-        zf = zipfile.ZipFile(zip_path)
+        raw_bytes = raw_name.encode("cp437")
+    except UnicodeEncodeError:
+        return raw_name
+    for enc in ("utf-8", "shift_jis"):
+        try:
+            return raw_bytes.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return raw_name
+
+
+_ZIP_NEST_DEPTH_LIMIT = 4  # 実機確認では2階層(fs-xcabinets)の入れ子までだったが、安全マージンを見て設定
+
+
+def _parse_zip_bytes(data: bytes, index: ColumnIndex, label_prefix: str,
+                      source_file_prefix: str, depth: int = 0) -> List[AliasRecord]:
+    """ZIPバイト列を展開せずメモリ上で解析する。エントリ自体がZIPの場合(MotionBoardの
+    内部コンテンツストアのように入れ子になっている場合)は指定の深さまで再帰的に展開する。
+    拡張子を持たないエントリ(内部ストアのボード本体・データソース定義等)も、中身の
+    先頭バイトでXML/ZIPかどうかを判定して拾う(拡張子だけに頼らない)。"""
+    records: List[AliasRecord] = []
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(data))
     except zipfile.BadZipFile:
-        print(f"  ※{zip_path.name} はZIPとして読み込めませんでした(壊れている可能性があります)")
+        print(f"  ※{label_prefix} はZIPとして読み込めませんでした(壊れている可能性があります)")
         return records
 
     with zf:
-        for name in zf.namelist():
+        for info in zf.infolist():
+            name = _decode_zip_entry_name(info.filename)
             if name.endswith("/"):
                 continue
-            label = f"{zip_path.name}:{name}"
-            entry_source_file = f"{zip_source_file}:{name}"
-            if name.lower().endswith(".xml"):
-                recs = auto_parse_xml(name, zf.read(name), index, source_file=entry_source_file)
+            content = zf.read(info.filename)
+            label = f"{label_prefix}:{name}"
+            entry_source_file = f"{source_file_prefix}:{name}"
+            if content[:4] in (b"PK\x03\x04", b"PK\x05\x06"):
+                if depth >= _ZIP_NEST_DEPTH_LIMIT:
+                    print(f"  ※{label} は入れ子ZIPの上限深度({_ZIP_NEST_DEPTH_LIMIT})に達したためスキップしました")
+                    continue
+                recs = _parse_zip_bytes(content, index, label, entry_source_file, depth=depth + 1)
+            elif name.lower().endswith(".xml") or content.lstrip()[:5] == b"<?xml":
+                recs = auto_parse_xml(name, content, index, source_file=entry_source_file)
             elif name.lower().endswith(".json"):
-                recs = auto_parse_json(name, zf.read(name), index, source_file=entry_source_file)
+                recs = auto_parse_json(name, content, index, source_file=entry_source_file)
             else:
                 continue
             if recs:
                 print(f"  検出: {label} → {len(recs)}件")
             records.extend(recs)
     return records
+
+
+def _auto_parse_zip(zip_path: Path, index: ColumnIndex,
+                     source_file: Optional[str] = None) -> List[AliasRecord]:
+    """ZIPファイルを、展開せずメモリ上で直接解析する(入れ子ZIP・拡張子なしエントリにも対応)。"""
+    zip_source_file = source_file or zip_path.name
+    return _parse_zip_bytes(zip_path.read_bytes(), index, zip_path.name, zip_source_file)
+
+
+def _latest_snapshot(fs_file_dir: Path) -> Optional[Path]:
+    """MotionBoardの内部コンテンツストア(`<ボード名>.fs-file/fs-snap/snap_*`)から、
+    連番が最大(最新)のスナップショットファイルを選ぶ。連番はゼロ埋めのため文字列
+    ソートで時系列順になる。"""
+    snap_dir = fs_file_dir / "fs-snap"
+    if not snap_dir.is_dir():
+        return None
+    snapshots = sorted(p for p in snap_dir.iterdir() if p.is_file() and p.name.startswith("snap_"))
+    return snapshots[-1] if snapshots else None
 
 
 def auto_parse_all(root_dir: Path, columns_path: str) -> List[AliasRecord]:
@@ -496,7 +641,9 @@ def auto_parse_all(root_dir: Path, columns_path: str) -> List[AliasRecord]:
     xml_files = list(root_dir.rglob("*.xml"))
     json_files = list(root_dir.rglob("*.json"))
     zip_files = list(root_dir.rglob("*.zip"))
-    print(f"XML {len(xml_files)}件 / JSON {len(json_files)}件 / ZIP {len(zip_files)}件を自動検出モードで走査します")
+    fs_file_dirs = [p for p in root_dir.rglob("*.fs-file") if p.is_dir()]
+    print(f"XML {len(xml_files)}件 / JSON {len(json_files)}件 / ZIP {len(zip_files)}件 / "
+          f"MotionBoard内部ストア(.fs-file) {len(fs_file_dirs)}件を自動検出モードで走査します")
 
     for path in xml_files:
         recs = auto_parse_xml(path.name, path.read_bytes(), index, source_file=str(path.relative_to(root_dir)))
@@ -512,6 +659,15 @@ def auto_parse_all(root_dir: Path, columns_path: str) -> List[AliasRecord]:
 
     for zip_path in zip_files:
         all_records.extend(_auto_parse_zip(zip_path, index, source_file=str(zip_path.relative_to(root_dir))))
+
+    for fs_file_dir in fs_file_dirs:
+        snapshot = _latest_snapshot(fs_file_dir)
+        if snapshot is None:
+            print(f"  ※{fs_file_dir.relative_to(root_dir)} にfs-snapのスナップショットが見つかりませんでした")
+            continue
+        rel = str(fs_file_dir.relative_to(root_dir))
+        recs = _parse_zip_bytes(snapshot.read_bytes(), index, fs_file_dir.name, rel)
+        all_records.extend(recs)
 
     if not all_records:
         print("  ※1件も検出できませんでした。暗号化/独自バイナリ形式の可能性があります。")

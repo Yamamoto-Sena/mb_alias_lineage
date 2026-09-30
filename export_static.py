@@ -18,7 +18,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from match_aliases import load_whitelist
+from match_aliases import load_whitelist, load_whitelist_entries
 from web_viewer import (
     INDEX_HTML,
     fetch_board_details,
@@ -34,7 +34,8 @@ def _escape_script_close(data) -> str:
     return json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
 
 
-def build_static_html(db_path: str, whitelist: set = None, threshold: float = 0.8) -> str:
+def build_static_html(db_path: str, whitelist: set = None, whitelist_entries: list = None,
+                       threshold: float = 0.8) -> str:
     data = fetch_data(db_path, whitelist=whitelist)
     warn_if_large(len(data))
     patterns = fetch_cross_column_patterns(db_path, whitelist=whitelist, threshold=threshold)
@@ -42,30 +43,38 @@ def build_static_html(db_path: str, whitelist: set = None, threshold: float = 0.
     data_json = _escape_script_close(data)
     patterns_json = _escape_script_close(patterns)
     board_details_json = _escape_script_close(board_details)
+    whitelist_json = _escape_script_close(whitelist_entries or [])
     generated_at = datetime.now().strftime("%Y-%m-%d %H:%M")
 
     html = INDEX_HTML
 
-    # fetch('/api/columns')・fetch('/api/patterns')・fetch('/api/board_details')で
-    # サーバーに問い合わせている部分を、埋め込み済みのJSONデータを直接使う形に置き換える
+    # 静的エクスポートはサーバーを持たないため、ホワイトリストの追加・削除ボタン
+    # (fetchでAPIを叩く操作)は無効にし、登録一覧は読み取り専用の埋め込みデータで表示する(DD-003)
+    html = html.replace("let STATIC_EXPORT = false;", "let STATIC_EXPORT = true;")
+
+    # fetch('/api/columns')等でサーバーに問い合わせている部分を、埋め込み済みの
+    # JSONデータを直接使う形に置き換える
     html = html.replace(
         """async function load() {
-  const [colRes, patRes, boardRes] = await Promise.all([
-    fetch('/api/columns'), fetch('/api/patterns'), fetch('/api/board_details'),
+  const [colRes, patRes, boardRes, whitelistRes] = await Promise.all([
+    fetch('/api/columns'), fetch('/api/patterns'), fetch('/api/board_details'), fetch('/api/whitelist'),
   ]);
   allRows = await colRes.json();
   const patterns = await patRes.json();
   const boardDetails = await boardRes.json();
+  const whitelistEntries = await whitelistRes.json();
   lastPatterns = patterns;
   renderCards(allRows, patterns);
   renderTable(allRows);
   renderManyToOne(patterns.many_to_one || []);
   renderSimilarPairs(patterns.similar_pairs || []);
+  renderWhitelist(whitelistEntries);
   initBoardDrilldown(boardDetails);
 }""",
         f"""const EMBEDDED_DATA = {data_json};
 const EMBEDDED_PATTERNS = {patterns_json};
 const EMBEDDED_BOARD_DETAILS = {board_details_json};
+const EMBEDDED_WHITELIST = {whitelist_json};
 
 async function load() {{
   allRows = EMBEDDED_DATA;
@@ -76,6 +85,7 @@ async function load() {{
   renderTable(allRows);
   renderManyToOne(patterns.many_to_one || []);
   renderSimilarPairs(patterns.similar_pairs || []);
+  renderWhitelist(EMBEDDED_WHITELIST);
   initBoardDrilldown(boardDetails);
 }}"""
     )
@@ -107,8 +117,10 @@ def main() -> None:
         print(f"エラー: --whitelist で指定されたファイルが見つかりません: {args.whitelist}")
         return
     whitelist = load_whitelist(args.whitelist) if args.whitelist else None
+    whitelist_entries = load_whitelist_entries(args.whitelist) if args.whitelist else []
 
-    html = build_static_html(args.db, whitelist=whitelist, threshold=args.similarity_threshold)
+    html = build_static_html(args.db, whitelist=whitelist, whitelist_entries=whitelist_entries,
+                              threshold=args.similarity_threshold)
     out_path = Path(args.out)
     out_path.write_text(html, encoding="utf-8")
     print(f"{out_path} を書き出しました({out_path.stat().st_size:,} bytes)")

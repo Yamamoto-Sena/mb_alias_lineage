@@ -28,10 +28,15 @@ from urllib.parse import urlparse
 from match_aliases import (
     _normalize_key,
     _normalize_text,
+    add_whitelist_entry,
     find_many_to_one_mappings,
     find_similar_display_name_pairs,
     load_whitelist,
+    load_whitelist_entries,
+    remove_whitelist_entry,
 )
+
+DEFAULT_WHITELIST_PATH = "naming_whitelist.json"
 
 INDEX_HTML = """<!DOCTYPE html>
 <html lang="ja">
@@ -112,6 +117,13 @@ INDEX_HTML = """<!DOCTYPE html>
   }
   .drilldown-count { font-size: 12px; color: var(--text-sub); white-space: nowrap; }
   .drilldown-hint { text-align: center; padding: 32px; color: var(--text-sub); font-size: 13px; }
+
+  .wl-btn, .wl-remove-btn {
+    font-size: 11px; border: none; border-radius: 6px; padding: 3px 8px;
+    cursor: pointer; white-space: nowrap; margin-left: 6px;
+  }
+  .wl-btn { color: var(--accent); background: var(--accent-bg); }
+  .wl-remove-btn { color: #b91c1c; background: #fde8e8; }
 </style>
 </head>
 <body>
@@ -165,6 +177,20 @@ INDEX_HTML = """<!DOCTYPE html>
   </table>
   <div id="similar-pairs-empty" class="empty" style="display:none">類似度による表記ゆれ候補は見つかりませんでした</div>
 
+  <h2>ホワイトリスト登録一覧</h2>
+  <table>
+    <thead>
+      <tr>
+        <th style="width:22%">テーブル/ビュー</th>
+        <th style="width:22%">物理カラム名</th>
+        <th style="width:44%">理由</th>
+        <th style="width:12%"></th>
+      </tr>
+    </thead>
+    <tbody id="whitelist-tbody"></tbody>
+  </table>
+  <div id="whitelist-empty" class="empty" style="display:none">ホワイトリストへの登録はありません</div>
+
   <h2>ボード別ドリルダウン</h2>
   <div class="drilldown-toolbar">
     <select id="board-select">
@@ -188,6 +214,7 @@ INDEX_HTML = """<!DOCTYPE html>
 </div>
 
 <script>
+let STATIC_EXPORT = false; // export_static.pyが埋め込みビルド時にtrueへ書き換える
 let allRows = [];
 let activeCardFilter = null; // null | 'naming' | 'unaliased' | 'orphan'
 
@@ -203,18 +230,25 @@ const CARD_DEFS = [
 ];
 
 async function load() {
-  const [colRes, patRes, boardRes] = await Promise.all([
-    fetch('/api/columns'), fetch('/api/patterns'), fetch('/api/board_details'),
+  const [colRes, patRes, boardRes, whitelistRes] = await Promise.all([
+    fetch('/api/columns'), fetch('/api/patterns'), fetch('/api/board_details'), fetch('/api/whitelist'),
   ]);
   allRows = await colRes.json();
   const patterns = await patRes.json();
   const boardDetails = await boardRes.json();
+  const whitelistEntries = await whitelistRes.json();
   lastPatterns = patterns;
   renderCards(allRows, patterns);
   renderTable(allRows);
   renderManyToOne(patterns.many_to_one || []);
   renderSimilarPairs(patterns.similar_pairs || []);
+  renderWhitelist(whitelistEntries);
   initBoardDrilldown(boardDetails);
+}
+
+function whitelistAddButton(tableName, columnName) {
+  if (STATIC_EXPORT) return '';
+  return `<button class="wl-btn" data-table="${escapeHtml(tableName)}" data-column="${escapeHtml(columnName)}">ホワイトリストに追加</button>`;
 }
 
 function renderCards(rows, patterns) {
@@ -300,7 +334,7 @@ function renderTable(rows) {
         <td>
           ${aliasBadges || (calcBadges ? '' : '<span class="status-ok">-</span>')}
           ${unaliasedBadge}
-          ${isWarn ? `<div class="status-warn">表記ゆれ ${r.alias_count}種</div>` : ''}
+          ${isWarn ? `<div class="status-warn">表記ゆれ ${r.alias_count}種 ${whitelistAddButton(r.table_name, r.column_name)}</div>` : ''}
           ${calcBadges ? `<div class="calc-line">カスタム項目/計算式で使用: ${calcBadges}</div>` : ''}
           ${isOrphan ? '<div class="calc-line">未使用(MotionBoardで参照なし)</div>' : ''}
         </td>
@@ -321,7 +355,9 @@ function renderManyToOne(items) {
   }
   empty.style.display = 'none';
   tbody.innerHTML = items.map(item => {
-    const cols = item.columns.map(c => `<code>[${escapeHtml(c.table_name)}].${escapeHtml(c.column_name)}</code>`).join(', ');
+    const cols = item.columns.map(c =>
+      `<code>[${escapeHtml(c.table_name)}].${escapeHtml(c.column_name)}</code>${whitelistAddButton(c.table_name, c.column_name)}`
+    ).join('<br>');
     return `
       <tr>
         <td><span class="badge warn">${escapeHtml(item.display_name)}</span></td>
@@ -342,9 +378,28 @@ function renderSimilarPairs(items) {
   empty.style.display = 'none';
   tbody.innerHTML = items.map(item => `
     <tr>
-      <td><code>[${escapeHtml(item.column_a.table_name)}].${escapeHtml(item.column_a.column_name)}</code> 「${escapeHtml(item.column_a.display_name)}」</td>
-      <td><code>[${escapeHtml(item.column_b.table_name)}].${escapeHtml(item.column_b.column_name)}</code> 「${escapeHtml(item.column_b.display_name)}」</td>
+      <td><code>[${escapeHtml(item.column_a.table_name)}].${escapeHtml(item.column_a.column_name)}</code> 「${escapeHtml(item.column_a.display_name)}」${whitelistAddButton(item.column_a.table_name, item.column_a.column_name)}</td>
+      <td><code>[${escapeHtml(item.column_b.table_name)}].${escapeHtml(item.column_b.column_name)}</code> 「${escapeHtml(item.column_b.display_name)}」${whitelistAddButton(item.column_b.table_name, item.column_b.column_name)}</td>
       <td class="ratio">${(item.ratio * 100).toFixed(0)}%</td>
+    </tr>
+  `).join('');
+}
+
+function renderWhitelist(entries) {
+  const tbody = document.getElementById('whitelist-tbody');
+  const empty = document.getElementById('whitelist-empty');
+  if (!entries || entries.length === 0) {
+    tbody.innerHTML = '';
+    empty.style.display = 'block';
+    return;
+  }
+  empty.style.display = 'none';
+  tbody.innerHTML = entries.map(e => `
+    <tr>
+      <td>${escapeHtml(e.table_name)}</td>
+      <td><code>${escapeHtml(e.column_name)}</code></td>
+      <td>${escapeHtml(e.reason || '')}</td>
+      <td>${STATIC_EXPORT ? '' : `<button class="wl-remove-btn" data-table="${escapeHtml(e.table_name)}" data-column="${escapeHtml(e.column_name)}">削除</button>`}</td>
     </tr>
   `).join('');
 }
@@ -410,6 +465,30 @@ document.getElementById('clear-filter').addEventListener('click', () => {
   activeCardFilter = null;
   renderCards(allRows, lastPatterns);
   applyFilters();
+});
+
+document.body.addEventListener('click', async (e) => {
+  const addBtn = e.target.closest('.wl-btn');
+  if (addBtn) {
+    // 理由(reason)は任意項目のため入力ダイアログは出さず、空欄で登録する。
+    // 理由を残したい場合はnaming_whitelist.jsonを直接編集するか、後日の拡張で対応する。
+    await fetch('/api/whitelist', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({table_name: addBtn.dataset.table, column_name: addBtn.dataset.column, reason: ''}),
+    });
+    location.reload();
+    return;
+  }
+  const delBtn = e.target.closest('.wl-remove-btn');
+  if (delBtn) {
+    await fetch('/api/whitelist/delete', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({table_name: delBtn.dataset.table, column_name: delBtn.dataset.column}),
+    });
+    location.reload();
+  }
 });
 
 load();
@@ -538,9 +617,75 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(data)
             except Exception as e:
                 self._send_json({"error": str(e)}, status=500)
+        elif parsed.path == "/api/whitelist":
+            try:
+                data = load_whitelist_entries(self.server.whitelist_path)
+                self._send_json(data)
+            except Exception as e:
+                self._send_json({"error": str(e)}, status=500)
         else:
             self.send_response(404)
             self.end_headers()
+
+    def do_POST(self):
+        parsed = urlparse(self.path)
+        try:
+            body = self._read_json_body()
+        except ValueError as e:
+            self._send_json({"error": str(e)}, status=400)
+            return
+
+        if parsed.path == "/api/whitelist":
+            self._handle_whitelist_add(body)
+        elif parsed.path == "/api/whitelist/delete":
+            self._handle_whitelist_delete(body)
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def _read_json_body(self) -> dict:
+        length = int(self.headers.get("Content-Length") or 0)
+        raw = self.rfile.read(length) if length else b""
+        try:
+            data = json.loads(raw.decode("utf-8")) if raw else {}
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            raise ValueError("リクエストボディがJSONとして解釈できません")
+        if not isinstance(data, dict):
+            raise ValueError("リクエストボディはJSONオブジェクトである必要があります")
+        return data
+
+    def _extract_table_column(self, body: dict):
+        """table_name/column_nameを取り出す(DD-003)。不正な場合は400を返しNoneを返す。"""
+        table_name = body.get("table_name")
+        column_name = body.get("column_name")
+        if not isinstance(table_name, str) or not table_name.strip() \
+                or not isinstance(column_name, str) or not column_name.strip():
+            self._send_json({"error": "table_nameとcolumn_nameは必須です"}, status=400)
+            return None
+        return table_name, column_name
+
+    def _handle_whitelist_add(self, body: dict) -> None:
+        parsed_names = self._extract_table_column(body)
+        if parsed_names is None:
+            return
+        table_name, column_name = parsed_names
+        reason = body.get("reason") or ""
+        entries = add_whitelist_entry(self.server.whitelist_path, table_name, column_name, reason=reason)
+        self.server.whitelist = {
+            _normalize_key(e["table_name"], e["column_name"]) for e in entries
+        }
+        self._send_json({"ok": True, "entries": entries})
+
+    def _handle_whitelist_delete(self, body: dict) -> None:
+        parsed_names = self._extract_table_column(body)
+        if parsed_names is None:
+            return
+        table_name, column_name = parsed_names
+        entries = remove_whitelist_entry(self.server.whitelist_path, table_name, column_name)
+        self.server.whitelist = {
+            _normalize_key(e["table_name"], e["column_name"]) for e in entries
+        }
+        self._send_json({"ok": True, "entries": entries})
 
     def _send_html(self, html: str) -> None:
         body = html.encode("utf-8")
@@ -567,7 +712,9 @@ def main() -> None:
     parser.add_argument("--db", default="lineage.db")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--no-browser", action="store_true", help="自動でブラウザを開かない")
-    parser.add_argument("--whitelist", help="表記ゆれ候補から除外する物理カラムの設定ファイル(naming_whitelist.json)")
+    parser.add_argument("--whitelist", help="表記ゆれ候補から除外する物理カラムの設定ファイル"
+                                             f"(未指定時は既定パス「{DEFAULT_WHITELIST_PATH}」を使用。"
+                                             "ファイルが無くても画面からの追加操作で新規作成される)")
     parser.add_argument("--similarity-threshold", type=float, default=0.8,
                          help="類似度による表記ゆれ候補の閾値(0〜1、デフォルト0.8)")
     args = parser.parse_args()
@@ -577,10 +724,13 @@ def main() -> None:
         print("先に match_aliases.py を実行して lineage.db を作成してください。")
         return
 
+    # --whitelistを明示指定した場合はtypo検知のため実在確認する。未指定時は既定パスを使い、
+    # ファイルが無くても起動時エラーにはしない(画面からの追加操作で新規作成される。DD-003)。
     if args.whitelist and not Path(args.whitelist).exists():
         print(f"エラー: --whitelist で指定されたファイルが見つかりません: {args.whitelist}")
         return
-    whitelist = load_whitelist(args.whitelist) if args.whitelist else None
+    whitelist_path = args.whitelist or DEFAULT_WHITELIST_PATH
+    whitelist = load_whitelist(whitelist_path) if Path(whitelist_path).exists() else set()
 
     with sqlite3.connect(args.db) as conn:
         row_count = conn.execute("SELECT COUNT(*) FROM columns").fetchone()[0]
@@ -592,6 +742,7 @@ def main() -> None:
     server = ThreadingHTTPServer(("localhost", args.port), Handler)
     server.db_path = args.db
     server.whitelist = whitelist
+    server.whitelist_path = whitelist_path
     server.similarity_threshold = args.similarity_threshold
     url = f"http://localhost:{args.port}"
     print(f"サーバーを起動しました: {url}")

@@ -42,6 +42,56 @@ def load_whitelist(path: str) -> set:
     return {_normalize_key(e["table_name"], e["column_name"]) for e in excluded}
 
 
+def load_whitelist_entries(path: str) -> list:
+    """UI編集用に、正規化前の生データ(table_name/column_name/reasonの元表記)のまま返す。
+
+    ファイルが存在しない場合はエラーにせず空リストを返す(DD-003: --whitelist未指定・
+    ファイル未作成の状態でも一覧取得できるようにするため)。
+    """
+    p = Path(path)
+    if not p.exists():
+        return []
+    data = load_json(path)
+    return data.get("excluded_columns") or []
+
+
+def save_whitelist_entries(path: str, entries: list) -> None:
+    Path(path).write_text(
+        json.dumps({"excluded_columns": entries}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def add_whitelist_entry(path: str, table_name: str, column_name: str, reason: str = "") -> list:
+    """(table_name, column_name)のエントリを追加して保存する(UI編集用、DD-003)。
+
+    正規化キーが既存エントリと一致する場合は何もしない(重複登録を防ぐ。既存のreasonも
+    上書きしない)。戻り値: 保存後の全エントリ。
+    """
+    entries = load_whitelist_entries(path)
+    key = _normalize_key(table_name, column_name)
+    already_exists = any(
+        _normalize_key(e["table_name"], e["column_name"]) == key for e in entries
+    )
+    if not already_exists:
+        entries.append({"table_name": table_name, "column_name": column_name, "reason": reason})
+        save_whitelist_entries(path, entries)
+    return entries
+
+
+def remove_whitelist_entry(path: str, table_name: str, column_name: str) -> list:
+    """(table_name, column_name)に正規化キーが一致するエントリを削除して保存する(UI編集用、DD-003)。
+
+    一致するエントリがなければ何もしない。戻り値: 保存後の全エントリ。
+    """
+    entries = load_whitelist_entries(path)
+    key = _normalize_key(table_name, column_name)
+    remaining = [e for e in entries if _normalize_key(e["table_name"], e["column_name"]) != key]
+    if len(remaining) != len(entries):
+        save_whitelist_entries(path, remaining)
+    return remaining
+
+
 def build_db(db_path: str, columns: list, aliases: list) -> None:
     schema_path = Path(__file__).parent / "db_schema.sql"
     conn = sqlite3.connect(db_path)

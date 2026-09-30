@@ -69,3 +69,19 @@ def test_build_static_html_embeds_patterns(tmp_path):
     html = es.build_static_html(_make_db(tmp_path))
     assert "EMBEDDED_PATTERNS" in html
     assert "fetch('/api/patterns')" not in html
+
+
+def test_build_static_html_disables_whitelist_editing(tmp_path):
+    # 静的エクスポートはサーバーを持たないため、追加・削除ボタンは無効化する(DD-003)
+    html = es.build_static_html(_make_db(tmp_path))
+    assert "let STATIC_EXPORT = true;" in html
+    assert "fetch('/api/whitelist')" not in html
+
+
+def test_build_static_html_embeds_whitelist_entries(tmp_path):
+    html = es.build_static_html(
+        _make_db(tmp_path),
+        whitelist_entries=[{"table_name": "T_A", "column_name": "COL1", "reason": "テスト用"}],
+    )
+    assert "EMBEDDED_WHITELIST" in html
+    assert "テスト用" in html

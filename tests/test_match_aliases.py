@@ -417,3 +417,53 @@ def test_report_history_diff_no_change(tmp_path, capsys):
     ma.report_history_diff(str(history_path), {"naming_inconsistencies": 3})
     out = capsys.readouterr().out
     assert "変化なし" in out
+
+
+def test_load_whitelist_entries_missing_file_returns_empty_list(tmp_path):
+    path = tmp_path / "naming_whitelist.json"
+    assert ma.load_whitelist_entries(str(path)) == []
+
+
+def test_add_whitelist_entry_creates_file_when_missing(tmp_path):
+    path = tmp_path / "naming_whitelist.json"
+    entries = ma.add_whitelist_entry(str(path), "T_A", "COL1", reason="テスト用")
+    assert entries == [{"table_name": "T_A", "column_name": "COL1", "reason": "テスト用"}]
+    assert path.exists()
+    assert ma.load_whitelist_entries(str(path)) == entries
+
+
+def test_add_whitelist_entry_reason_defaults_to_empty_string(tmp_path):
+    path = tmp_path / "naming_whitelist.json"
+    entries = ma.add_whitelist_entry(str(path), "T_A", "COL1")
+    assert entries[0]["reason"] == ""
+
+
+def test_add_whitelist_entry_is_idempotent_for_same_column(tmp_path):
+    path = tmp_path / "naming_whitelist.json"
+    ma.add_whitelist_entry(str(path), "T_A", "COL1", reason="1回目")
+    entries = ma.add_whitelist_entry(str(path), "T_A", "COL1", reason="2回目")
+    assert len(entries) == 1
+    assert entries[0]["reason"] == "1回目"  # 既存エントリは上書きしない
+
+
+def test_add_whitelist_entry_matches_existing_entry_by_normalized_key(tmp_path):
+    path = tmp_path / "naming_whitelist.json"
+    ma.add_whitelist_entry(str(path), "T_A", "COL1")
+    entries = ma.add_whitelist_entry(str(path), "ｔ_ａ", "ｃｏｌ１")  # 全角/大小文字違い
+    assert len(entries) == 1
+
+
+def test_remove_whitelist_entry_removes_matching_entry(tmp_path):
+    path = tmp_path / "naming_whitelist.json"
+    ma.add_whitelist_entry(str(path), "T_A", "COL1")
+    ma.add_whitelist_entry(str(path), "T_B", "COL2")
+    entries = ma.remove_whitelist_entry(str(path), "T_A", "COL1")
+    assert entries == [{"table_name": "T_B", "column_name": "COL2", "reason": ""}]
+    assert ma.load_whitelist_entries(str(path)) == entries
+
+
+def test_remove_whitelist_entry_missing_entry_is_noop(tmp_path):
+    path = tmp_path / "naming_whitelist.json"
+    ma.add_whitelist_entry(str(path), "T_A", "COL1")
+    entries = ma.remove_whitelist_entry(str(path), "T_X", "COL_X")
+    assert len(entries) == 1

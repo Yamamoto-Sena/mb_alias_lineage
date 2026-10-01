@@ -168,9 +168,15 @@ INDEX_HTML = """<!DOCTYPE html>
   }
   .update-hint .load-btn { margin-top: 8px; }
   #update-cmd-status { margin-left: 8px; font-size: 12px; color: var(--text-sub); }
-  thead th[data-sort-col] { cursor: pointer; user-select: none; }
+  thead th[data-sort-col] { cursor: pointer; user-select: none; white-space: nowrap; }
   thead th[data-sort-col]:hover { color: var(--accent); }
   .sort-arrow { display: inline-block; min-width: 10px; margin-left: 3px; font-size: 10px; color: var(--accent); }
+  .col-move-buttons { display: inline-block; margin-right: 4px; }
+  .col-move-btn {
+    font-size: 10px; line-height: 1; border: 1px solid var(--border); border-radius: 4px;
+    background: var(--surface); color: var(--text-sub); cursor: pointer; padding: 2px 4px; margin-right: 2px;
+  }
+  .col-move-btn:hover { color: var(--accent); border-color: var(--accent); }
   .connect-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px,1fr)); gap: 8px 16px; margin-bottom: 10px; }
   .connect-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-sub); }
   .connect-form input {
@@ -247,13 +253,7 @@ INDEX_HTML = """<!DOCTYPE html>
 
   <table>
     <thead>
-      <tr>
-        <th style="width:16%" data-sort-col="table_name">テーブル/ビュー<span class="sort-arrow"></span></th>
-        <th style="width:16%" data-sort-col="column_name">物理カラム名<span class="sort-arrow"></span></th>
-        <th style="width:34%" data-sort-col="display_name">表示名(エイリアス)<span class="sort-arrow"></span></th>
-        <th style="width:10%" data-sort-col="usage_count">使用件数<span class="sort-arrow"></span></th>
-        <th style="width:24%" data-sort-col="boards">使用ボード<span class="sort-arrow"></span></th>
-      </tr>
+      <tr id="main-thead-row"></tr>
     </thead>
     <tbody id="tbody"></tbody>
   </table>
@@ -327,6 +327,7 @@ let allRows = [];
 let activeCardFilter = null; // null | 'naming' | 'unaliased' | 'orphan'
 let sortColumn = null; // null | 'table_name' | 'column_name' | 'display_name' | 'usage_count' | 'boards'
 let sortDirection = 'asc'; // 'asc' | 'desc'
+let columnOrder = ['table_name', 'column_name', 'display_name', 'usage_count', 'boards']; // 表示上の列の並び順(左→右)
 
 // ============================================================
 // 類似度アルゴリズム(difflib.SequenceMatcher.ratioの移植、DD-006)
@@ -542,7 +543,7 @@ async function handleLoadUploaded() {
     const boardDetails = jsFetchBoardDetails(db);
     lastPatterns = patterns;
     sortColumn = null;
-    updateSortIndicators();
+    renderTableHeader();
     renderCards(allRows, patterns);
     renderTable(allRows);
     renderManyToOne(patterns.many_to_one || []);
@@ -705,12 +706,85 @@ function sortRows(rows) {
   return rows.slice().sort((a, b) => compareRows(a, b, sortColumn, sortDirection));
 }
 
-function updateSortIndicators() {
-  document.querySelectorAll('th[data-sort-col]').forEach(th => {
-    const arrow = th.querySelector('.sort-arrow');
-    arrow.textContent = (th.dataset.sortCol === sortColumn) ? (sortDirection === 'asc' ? '▲' : '▼') : '';
-  });
+function renderDisplayNameCell(r) {
+  const isWarn = !!r.is_naming_variant;
+  const isOrphan = !!r.is_orphan;
+  const calcNames = r.calc_names || [];
+  const aliasBadges = r.display_names.map(n =>
+    `<span class="badge ${isWarn ? 'warn' : ''}"${isWarn ? ' title="表記ゆれ候補として検出された表示名です"' : ''}>${escapeHtml(n)}</span>`
+  ).join('');
+  const calcBadges = calcNames.map(n =>
+    `<span class="badge calc" title="カスタム項目・計算式の中でこの物理カラムが参照されています">${escapeHtml(n)}</span>`
+  ).join('');
+  const unaliasedBadge = r.is_unaliased ? '<span class="badge unaliased" title="表示名が設定されず、物理カラム名がそのまま使われています">物理名そのまま</span>' : '';
+  return `
+    ${aliasBadges || (calcBadges ? '' : '<span class="status-ok">-</span>')}
+    ${unaliasedBadge}
+    ${isWarn ? `<div class="status-warn">表記ゆれ ${r.alias_count}種 ${whitelistAddButton(r.table_name, r.column_name)}</div>` : ''}
+    ${calcBadges ? `<div class="calc-line">カスタム項目/計算式で使用: ${calcBadges}</div>` : ''}
+    ${isOrphan ? '<div class="calc-line">未使用(MotionBoardで参照なし)</div>' : ''}
+  `;
 }
+
+function renderBoardsCell(r) {
+  const boardList = r.boards.slice(0, 3).join(', ') + (r.boards.length > 3 ? ` 他${r.boards.length - 3}件` : '');
+  return escapeHtml(boardList) || '-';
+}
+
+const MAIN_COLUMN_DEFS = {
+  table_name: { label: 'テーブル/ビュー', width: '16%', cell: r => escapeHtml(r.table_name) },
+  column_name: { label: '物理カラム名', width: '16%', cell: r => `<code>${escapeHtml(r.column_name)}</code>` },
+  display_name: { label: '表示名(エイリアス)', width: '34%', cell: renderDisplayNameCell },
+  usage_count: { label: '使用件数', width: '10%', cell: r => `${r.usage_count}件` },
+  boards: { label: '使用ボード', width: '24%', className: 'boards', cell: renderBoardsCell },
+};
+
+function renderTableHeader() {
+  const headRow = document.getElementById('main-thead-row');
+  headRow.innerHTML = columnOrder.map((key, idx) => {
+    const def = MAIN_COLUMN_DEFS[key];
+    const arrow = (sortColumn === key) ? (sortDirection === 'asc' ? '▲' : '▼') : '';
+    const leftBtn = idx > 0
+      ? `<button type="button" class="col-move-btn" data-move="left" data-col="${key}" title="左の列と入れ替え">←</button>` : '';
+    const rightBtn = idx < columnOrder.length - 1
+      ? `<button type="button" class="col-move-btn" data-move="right" data-col="${key}" title="右の列と入れ替え">→</button>` : '';
+    return `<th style="width:${def.width}" data-sort-col="${key}">` +
+      `<span class="col-move-buttons">${leftBtn}${rightBtn}</span>` +
+      `<span class="th-label">${def.label}</span><span class="sort-arrow">${arrow}</span></th>`;
+  }).join('');
+}
+
+function moveColumn(key, direction) {
+  const idx = columnOrder.indexOf(key);
+  const swapWith = direction === 'left' ? idx - 1 : idx + 1;
+  if (idx === -1 || swapWith < 0 || swapWith >= columnOrder.length) return;
+  [columnOrder[idx], columnOrder[swapWith]] = [columnOrder[swapWith], columnOrder[idx]];
+  renderTableHeader();
+  applyFilters();
+}
+
+document.querySelector('#main-thead-row').closest('thead').addEventListener('click', (e) => {
+  const moveBtn = e.target.closest('.col-move-btn');
+  if (moveBtn) {
+    e.stopPropagation();
+    moveColumn(moveBtn.dataset.col, moveBtn.dataset.move);
+    return;
+  }
+  const th = e.target.closest('th[data-sort-col]');
+  if (!th) return;
+  const col = th.dataset.sortCol;
+  if (sortColumn !== col) {
+    sortColumn = col;
+    sortDirection = 'asc';
+  } else if (sortDirection === 'asc') {
+    sortDirection = 'desc';
+  } else {
+    sortColumn = null;
+    sortDirection = 'asc';
+  }
+  renderTableHeader();
+  applyFilters();
+});
 
 function applyFilters() {
   const q = document.getElementById('search').value.trim().toLowerCase();
@@ -732,33 +806,15 @@ function renderTable(rows) {
   tbody.innerHTML = rows.map(r => {
     const isWarn = !!r.is_naming_variant;
     const isOrphan = !!r.is_orphan;
-    const calcNames = r.calc_names || [];
-    const aliasBadges = r.display_names.map(n =>
-      `<span class="badge ${isWarn ? 'warn' : ''}"${isWarn ? ' title="表記ゆれ候補として検出された表示名です"' : ''}>${escapeHtml(n)}</span>`
-    ).join('');
-    const calcBadges = calcNames.map(n =>
-      `<span class="badge calc" title="カスタム項目・計算式の中でこの物理カラムが参照されています">${escapeHtml(n)}</span>`
-    ).join('');
-    const unaliasedBadge = r.is_unaliased ? '<span class="badge unaliased" title="表示名が設定されず、物理カラム名がそのまま使われています">物理名そのまま</span>' : '';
-    const boardList = r.boards.slice(0, 3).join(', ') + (r.boards.length > 3 ? ` 他${r.boards.length - 3}件` : '');
     const rowTitle = isWarn
       ? ' title="表記ゆれ候補: 同じ物理カラムに複数の表示名が使われています"'
       : (isOrphan ? ' title="未使用: どのMotionBoardボードからも参照されていません"' : '');
-    return `
-      <tr class="${isWarn ? 'warn' : ''} ${isOrphan ? 'orphan' : ''}"${rowTitle}>
-        <td>${escapeHtml(r.table_name)}</td>
-        <td><code>${escapeHtml(r.column_name)}</code></td>
-        <td>
-          ${aliasBadges || (calcBadges ? '' : '<span class="status-ok">-</span>')}
-          ${unaliasedBadge}
-          ${isWarn ? `<div class="status-warn">表記ゆれ ${r.alias_count}種 ${whitelistAddButton(r.table_name, r.column_name)}</div>` : ''}
-          ${calcBadges ? `<div class="calc-line">カスタム項目/計算式で使用: ${calcBadges}</div>` : ''}
-          ${isOrphan ? '<div class="calc-line">未使用(MotionBoardで参照なし)</div>' : ''}
-        </td>
-        <td>${r.usage_count}件</td>
-        <td class="boards">${escapeHtml(boardList) || '-'}</td>
-      </tr>
-    `;
+    const cells = columnOrder.map(key => {
+      const def = MAIN_COLUMN_DEFS[key];
+      const cls = def.className ? ` class="${def.className}"` : '';
+      return `<td${cls}>${def.cell(r)}</td>`;
+    }).join('');
+    return `<tr class="${isWarn ? 'warn' : ''} ${isOrphan ? 'orphan' : ''}"${rowTitle}>${cells}</tr>`;
   }).join('');
 }
 
@@ -884,23 +940,6 @@ document.getElementById('clear-filter').addEventListener('click', () => {
   applyFilters();
 });
 
-document.querySelectorAll('th[data-sort-col]').forEach(th => {
-  th.addEventListener('click', () => {
-    const col = th.dataset.sortCol;
-    if (sortColumn !== col) {
-      sortColumn = col;
-      sortDirection = 'asc';
-    } else if (sortDirection === 'asc') {
-      sortDirection = 'desc';
-    } else {
-      sortColumn = null;
-      sortDirection = 'asc';
-    }
-    updateSortIndicators();
-    applyFilters();
-  });
-});
-
 document.body.addEventListener('click', async (e) => {
   const addBtn = e.target.closest('.wl-btn');
   if (addBtn) {
@@ -960,7 +999,7 @@ document.getElementById('mode-demo-btn').addEventListener('click', () => {
   document.getElementById('upload-status').textContent = '';
   UPLOADED_MODE = false;
   sortColumn = null;
-  updateSortIndicators();
+  renderTableHeader();
   load();
 });
 
@@ -993,7 +1032,7 @@ document.getElementById('do-connect-btn').addEventListener('click', async () => 
     statusEl.textContent = '取得完了。画面を更新します...';
     setActiveMode('mode-demo-btn');
     sortColumn = null;
-    updateSortIndicators();
+    renderTableHeader();
     await load();
   } catch (err) {
     statusEl.textContent = 'エラー: ' + err.message;
@@ -1058,6 +1097,7 @@ document.getElementById('copy-update-cmd-btn').addEventListener('click', async (
   setTimeout(() => { statusEl.textContent = ''; }, 2500);
 });
 
+renderTableHeader();
 load();
 </script>
 </body>

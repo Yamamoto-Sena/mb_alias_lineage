@@ -150,6 +150,27 @@ INDEX_HTML = """<!DOCTYPE html>
     color: var(--accent); background: var(--accent-bg); margin-left: 8px;
   }
   #upload-status, #connect-status { margin-top: 8px; font-size: 12px; color: var(--text-sub); white-space: pre-wrap; }
+  .update-hint { margin: 0 0 16px; font-size: 12px; color: var(--text-sub); }
+  .update-hint summary { cursor: pointer; color: var(--accent); font-weight: 500; }
+  .update-hint p { margin: 8px 0 0; line-height: 1.7; }
+  .update-hint pre {
+    margin: 8px 0 0; padding: 10px 12px; background: var(--accent-bg); color: var(--accent);
+    border-radius: 6px; font-size: 11px; overflow-x: auto; white-space: pre-wrap; word-break: break-all;
+  }
+  .update-hint-form {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(200px,1fr)); gap: 8px 12px;
+    margin: 10px 0 0;
+  }
+  .update-hint-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-sub); }
+  .update-hint-form input {
+    padding: 6px 9px; border: 1px solid var(--border); border-radius: 6px;
+    font-size: 12px; background: var(--surface); color: var(--text);
+  }
+  .update-hint .load-btn { margin-top: 8px; }
+  #update-cmd-status { margin-left: 8px; font-size: 12px; color: var(--text-sub); }
+  thead th[data-sort-col] { cursor: pointer; user-select: none; }
+  thead th[data-sort-col]:hover { color: var(--accent); }
+  .sort-arrow { display: inline-block; min-width: 10px; margin-left: 3px; font-size: 10px; color: var(--accent); }
   .connect-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px,1fr)); gap: 8px 16px; margin-bottom: 10px; }
   .connect-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-sub); }
   .connect-form input {
@@ -162,6 +183,24 @@ INDEX_HTML = """<!DOCTYPE html>
 <div class="wrap">
   <h1>カラム・エイリアス使用状況マップ</h1>
   <p class="sub">Dr.Sum物理カラム ⇔ MotionBoard表示名の対応関係(lineage.dbより)</p>
+
+  <details class="update-hint">
+    <summary>🔧 データを更新するには</summary>
+    <p>最新のDr.Sum/MotionBoardデータを取り込むには、以下を実行してください。
+    下の項目にお使いの環境の値を入力すると、コマンドが自動的に書き換わります
+    （未入力の項目はプレースホルダのままです）。</p>
+    <div class="update-hint-form">
+      <label>MotionBoardバックアップフォルダ <input type="text" id="cmd-backup-dir"></label>
+      <label>Dr.Sumホスト名 <input type="text" id="cmd-host"></label>
+      <label>Dr.SumのDB名 <input type="text" id="cmd-db"></label>
+      <label>Dr.Sumユーザー名 <input type="text" id="cmd-user"></label>
+      <label>JDBCドライバーのパス <input type="text" id="cmd-jdbc-jar"></label>
+    </div>
+    <pre><code id="update-cmd-output"></code></pre>
+    <button class="load-btn" id="copy-update-cmd-btn" type="button">コピー</button>
+    <span id="update-cmd-status"></span>
+    <p>詳細はREADME.mdを参照してください。</p>
+  </details>
 
   <div class="mode-toggle">
     <button class="mode-btn active" id="mode-demo-btn">このデータを見る</button>
@@ -209,18 +248,18 @@ INDEX_HTML = """<!DOCTYPE html>
   <table>
     <thead>
       <tr>
-        <th style="width:16%">テーブル/ビュー</th>
-        <th style="width:16%">物理カラム名</th>
-        <th style="width:34%">表示名(エイリアス)</th>
-        <th style="width:10%">使用件数</th>
-        <th style="width:24%">使用ボード</th>
+        <th style="width:16%" data-sort-col="table_name">テーブル/ビュー<span class="sort-arrow"></span></th>
+        <th style="width:16%" data-sort-col="column_name">物理カラム名<span class="sort-arrow"></span></th>
+        <th style="width:34%" data-sort-col="display_name">表示名(エイリアス)<span class="sort-arrow"></span></th>
+        <th style="width:10%" data-sort-col="usage_count">使用件数<span class="sort-arrow"></span></th>
+        <th style="width:24%" data-sort-col="boards">使用ボード<span class="sort-arrow"></span></th>
       </tr>
     </thead>
     <tbody id="tbody"></tbody>
   </table>
   <div id="empty" class="empty" style="display:none">該当するカラムがありません</div>
 
-  <h2>多対1マッピング候補</h2>
+  <h2 title="異なる物理カラムに同じ表示名が使われている候補です(意図的な使い回しか表記の混同かは目視確認が必要です)">多対1マッピング候補</h2>
   <table>
     <thead>
       <tr>
@@ -232,7 +271,7 @@ INDEX_HTML = """<!DOCTYPE html>
   </table>
   <div id="many-to-one-empty" class="empty" style="display:none">多対1マッピング候補は見つかりませんでした</div>
 
-  <h2>表記ゆれ候補(類似度判定・要目視確認)</h2>
+  <h2 title="表記が似ている表示名の組を機械的に検出した候補です(実際に同じ意味かは目視確認が必要です)">表記ゆれ候補(類似度判定・要目視確認)</h2>
   <table>
     <thead>
       <tr>
@@ -286,6 +325,8 @@ let STATIC_EXPORT = false; // export_static.pyが埋め込みビルド時にtrue
 let UPLOADED_MODE = false; // 実データアップロードモード中はtrue(DD-006)。編集ボタンを無効化する
 let allRows = [];
 let activeCardFilter = null; // null | 'naming' | 'unaliased' | 'orphan'
+let sortColumn = null; // null | 'table_name' | 'column_name' | 'display_name' | 'usage_count' | 'boards'
+let sortDirection = 'asc'; // 'asc' | 'desc'
 
 // ============================================================
 // 類似度アルゴリズム(difflib.SequenceMatcher.ratioの移植、DD-006)
@@ -500,6 +541,8 @@ async function handleLoadUploaded() {
     const patterns = jsFetchCrossColumnPatterns(db, whitelistSet, 0.8);
     const boardDetails = jsFetchBoardDetails(db);
     lastPatterns = patterns;
+    sortColumn = null;
+    updateSortIndicators();
     renderCards(allRows, patterns);
     renderTable(allRows);
     renderManyToOne(patterns.many_to_one || []);
@@ -515,13 +558,18 @@ async function handleLoadUploaded() {
 
 const CARD_DEFS = [
   { key: null, label: "総カラム数", value: (rows, patterns) => rows.length },
-  { key: "naming", label: "表記ゆれ候補", value: (rows) => rows.filter(r => r.is_naming_variant).length },
+  { key: "naming", label: "表記ゆれ候補", value: (rows) => rows.filter(r => r.is_naming_variant).length,
+    tooltip: "同じ物理カラムに、表記の異なる表示名が複数使われている可能性がある項目の件数です" },
   { key: null, label: "使用箇所(延べ)", value: (rows) => rows.reduce((sum, r) => sum + (r.usage_count || 0), 0) },
   { key: null, label: "カスタム項目/計算式で使用", value: (rows) => rows.filter(r => r.calc_names && r.calc_names.length > 0).length },
-  { key: "unaliased", label: "物理名そのまま", value: (rows) => rows.filter(r => r.is_unaliased).length },
-  { key: "orphan", label: "未使用カラム", value: (rows) => rows.filter(r => r.is_orphan).length },
-  { key: null, label: "多対1候補", value: (rows, patterns) => (patterns.many_to_one || []).length },
-  { key: null, label: "類似度候補", value: (rows, patterns) => (patterns.similar_pairs || []).length },
+  { key: "unaliased", label: "物理名そのまま", value: (rows) => rows.filter(r => r.is_unaliased).length,
+    tooltip: "表示名が設定されず、物理カラム名がそのままMotionBoardの画面に表示されている項目の件数です" },
+  { key: "orphan", label: "未使用カラム", value: (rows) => rows.filter(r => r.is_orphan).length,
+    tooltip: "Dr.Sum上には存在するが、MotionBoardのどのボードからも参照されていない物理カラムの件数です" },
+  { key: null, label: "多対1候補", value: (rows, patterns) => (patterns.many_to_one || []).length,
+    tooltip: "異なる物理カラムに同じ表示名が使われている候補の件数です(意図的な使い回しか表記の混同かは目視確認が必要です)" },
+  { key: null, label: "類似度候補", value: (rows, patterns) => (patterns.similar_pairs || []).length,
+    tooltip: "表記が似ている表示名の組を機械的に検出した候補の件数です(実際に同じ意味かは目視確認が必要です)" },
 ];
 
 async function load() {
@@ -582,7 +630,8 @@ function renderCards(rows, patterns) {
     const a11y = clickable
       ? `role="button" tabindex="0" aria-pressed="${selected}" aria-label="${escapeHtml(def.label)}でカラム一覧を絞り込む"`
       : '';
-    return `<div class="${classes}" data-key="${def.key || ''}" data-clickable="${clickable}" ${a11y}>
+    const titleAttr = def.tooltip ? ` title="${escapeHtml(def.tooltip)}"` : '';
+    return `<div class="${classes}" data-key="${def.key || ''}" data-clickable="${clickable}" ${a11y}${titleAttr}>
       <div class="label">${def.label}${hint}</div>
       <div class="value">${def.value(rows, patterns)}</div>
     </div>`;
@@ -621,10 +670,53 @@ function matchesSearch(r, q) {
     r.boards.some(b => b.toLowerCase().includes(q));
 }
 
+function compareRows(a, b, column, direction) {
+  const dir = direction === 'desc' ? -1 : 1;
+  switch (column) {
+    case 'table_name':
+      return dir * a.table_name.localeCompare(b.table_name, 'ja');
+    case 'column_name':
+      return dir * a.column_name.localeCompare(b.column_name, 'ja');
+    case 'display_name': {
+      const an = (a.display_names && a.display_names[0]) || '';
+      const bn = (b.display_names && b.display_names[0]) || '';
+      if (an === '' && bn === '') return 0;
+      if (an === '') return 1; // エイリアス未設定行は方向に関わらず末尾
+      if (bn === '') return -1;
+      return dir * an.localeCompare(bn, 'ja');
+    }
+    case 'usage_count':
+      return dir * ((a.usage_count || 0) - (b.usage_count || 0));
+    case 'boards': {
+      const al = a.boards ? a.boards.length : 0;
+      const bl = b.boards ? b.boards.length : 0;
+      if (al !== bl) return dir * (al - bl);
+      const an = (a.boards && a.boards[0]) || '';
+      const bn = (b.boards && b.boards[0]) || '';
+      return dir * an.localeCompare(bn, 'ja');
+    }
+    default:
+      return 0;
+  }
+}
+
+function sortRows(rows) {
+  if (!sortColumn) return rows;
+  return rows.slice().sort((a, b) => compareRows(a, b, sortColumn, sortDirection));
+}
+
+function updateSortIndicators() {
+  document.querySelectorAll('th[data-sort-col]').forEach(th => {
+    const arrow = th.querySelector('.sort-arrow');
+    arrow.textContent = (th.dataset.sortCol === sortColumn) ? (sortDirection === 'asc' ? '▲' : '▼') : '';
+  });
+}
+
 function applyFilters() {
   const q = document.getElementById('search').value.trim().toLowerCase();
   document.getElementById('clear-filter').disabled = !activeCardFilter;
-  renderTable(allRows.filter(r => matchesCardFilter(r) && matchesSearch(r, q)));
+  const filtered = allRows.filter(r => matchesCardFilter(r) && matchesSearch(r, q));
+  renderTable(sortRows(filtered));
 }
 
 function renderTable(rows) {
@@ -642,15 +734,18 @@ function renderTable(rows) {
     const isOrphan = !!r.is_orphan;
     const calcNames = r.calc_names || [];
     const aliasBadges = r.display_names.map(n =>
-      `<span class="badge ${isWarn ? 'warn' : ''}">${escapeHtml(n)}</span>`
+      `<span class="badge ${isWarn ? 'warn' : ''}"${isWarn ? ' title="表記ゆれ候補として検出された表示名です"' : ''}>${escapeHtml(n)}</span>`
     ).join('');
     const calcBadges = calcNames.map(n =>
-      `<span class="badge calc">${escapeHtml(n)}</span>`
+      `<span class="badge calc" title="カスタム項目・計算式の中でこの物理カラムが参照されています">${escapeHtml(n)}</span>`
     ).join('');
-    const unaliasedBadge = r.is_unaliased ? '<span class="badge unaliased">物理名そのまま</span>' : '';
+    const unaliasedBadge = r.is_unaliased ? '<span class="badge unaliased" title="表示名が設定されず、物理カラム名がそのまま使われています">物理名そのまま</span>' : '';
     const boardList = r.boards.slice(0, 3).join(', ') + (r.boards.length > 3 ? ` 他${r.boards.length - 3}件` : '');
+    const rowTitle = isWarn
+      ? ' title="表記ゆれ候補: 同じ物理カラムに複数の表示名が使われています"'
+      : (isOrphan ? ' title="未使用: どのMotionBoardボードからも参照されていません"' : '');
     return `
-      <tr class="${isWarn ? 'warn' : ''} ${isOrphan ? 'orphan' : ''}">
+      <tr class="${isWarn ? 'warn' : ''} ${isOrphan ? 'orphan' : ''}"${rowTitle}>
         <td>${escapeHtml(r.table_name)}</td>
         <td><code>${escapeHtml(r.column_name)}</code></td>
         <td>
@@ -789,6 +884,23 @@ document.getElementById('clear-filter').addEventListener('click', () => {
   applyFilters();
 });
 
+document.querySelectorAll('th[data-sort-col]').forEach(th => {
+  th.addEventListener('click', () => {
+    const col = th.dataset.sortCol;
+    if (sortColumn !== col) {
+      sortColumn = col;
+      sortDirection = 'asc';
+    } else if (sortDirection === 'asc') {
+      sortDirection = 'desc';
+    } else {
+      sortColumn = null;
+      sortDirection = 'asc';
+    }
+    updateSortIndicators();
+    applyFilters();
+  });
+});
+
 document.body.addEventListener('click', async (e) => {
   const addBtn = e.target.closest('.wl-btn');
   if (addBtn) {
@@ -847,6 +959,8 @@ document.getElementById('mode-demo-btn').addEventListener('click', () => {
   setActiveMode('mode-demo-btn');
   document.getElementById('upload-status').textContent = '';
   UPLOADED_MODE = false;
+  sortColumn = null;
+  updateSortIndicators();
   load();
 });
 
@@ -878,6 +992,8 @@ document.getElementById('do-connect-btn').addEventListener('click', async () => 
     }
     statusEl.textContent = '取得完了。画面を更新します...';
     setActiveMode('mode-demo-btn');
+    sortColumn = null;
+    updateSortIndicators();
     await load();
   } catch (err) {
     statusEl.textContent = 'エラー: ' + err.message;
@@ -887,6 +1003,60 @@ document.getElementById('do-connect-btn').addEventListener('click', async () => 
 if (STATIC_EXPORT) {
   document.getElementById('mode-connect-btn').style.display = 'none';
 }
+
+const UPDATE_CMD_FIELDS = [
+  { id: 'cmd-backup-dir', flag: '--backup-dir', placeholder: 'MotionBoardバックアップフォルダ' },
+  { id: 'cmd-host', flag: '--host', placeholder: 'Dr.Sumホスト名' },
+  { id: 'cmd-db', flag: '--db', placeholder: 'Dr.SumのDB名' },
+  { id: 'cmd-user', flag: '--user', placeholder: 'Dr.Sumユーザー名' },
+  { id: 'cmd-jdbc-jar', flag: '--jdbc-jar', placeholder: 'JDBCドライバーのパス' },
+];
+
+function updateCommandPreview() {
+  const parts = ['python main.py'];
+  for (const f of UPDATE_CMD_FIELDS) {
+    const val = document.getElementById(f.id).value.trim();
+    parts.push(`${f.flag} ${val ? val : '<' + f.placeholder + '>'}`);
+  }
+  document.getElementById('update-cmd-output').textContent = parts.join(' ');
+}
+
+UPDATE_CMD_FIELDS.forEach(f => {
+  document.getElementById(f.id).addEventListener('input', updateCommandPreview);
+});
+updateCommandPreview();
+
+async function copyTextToClipboard(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (err) {
+      // 失敗時はフォールバックへ
+    }
+  }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  } catch (err) {
+    return false;
+  }
+}
+
+document.getElementById('copy-update-cmd-btn').addEventListener('click', async () => {
+  const statusEl = document.getElementById('update-cmd-status');
+  const ok = await copyTextToClipboard(document.getElementById('update-cmd-output').textContent);
+  statusEl.textContent = ok ? 'コピーしました' : 'コピーに失敗しました。手動で選択してコピーしてください';
+  setTimeout(() => { statusEl.textContent = ''; }, 2500);
+});
 
 load();
 </script>

@@ -283,8 +283,8 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-`board_parser.py`の自動検出ロジック(`sample_data/`の12ファイル全件を使った
-回帰テスト。特に直近修正した7パターンはファイル単位でピンポイントに検証)、
+`board_parser.py`の自動検出ロジック(`sample_data/`の全17ファイル〔XML12・JSON4・ZIP1〕を
+使った回帰テスト。特に直近修正した7パターンはファイル単位でピンポイントに検証)、
 `match_aliases.py`の突き合わせ・表記ゆれ検出、`web_viewer.py`/`export_static.py`
 のデータ整形、`main.py`のオーケストレーションを中心にカバーしています。
 ロジックを変更した際は、まず `pytest` を実行して既存の挙動を壊していないか

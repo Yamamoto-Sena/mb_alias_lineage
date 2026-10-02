@@ -13,6 +13,10 @@ _tmp_*
 /board_aliases.json
 /column_alias_map.html
 /*.history.json
+/naming_whitelist.json
+
+# レビュー共有用に export_static.py で書き出す一時HTML(用途ごとに使い捨て)
+/for_review_check.html
 
 # デモ用データ(demo_data/)の中間生成物。dr_sum_columns.json・motionboard_backup/・
 # dummygen_schema.yaml・build_dr_sum_columns.py はソースなので除外しない

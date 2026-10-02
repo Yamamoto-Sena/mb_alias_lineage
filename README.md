@@ -12,6 +12,12 @@ Dr.Sum上の物理カラムが、MotionBoard上でどんな別名（エイリア
 そのまま指定してもよい（DD-002-3で対応。実データソース定義`<DataSource type="drsum">`
 は専用ロジックで解析する）。
 
+## 関連ドキュメント
+
+- [`doc/project-overview.md`](doc/project-overview.md) — プロジェクトのスコープ・環境・方針
+- [`doc/guide/user-guide.md`](doc/guide/user-guide.md) — 専門用語に詳しくない人向けの利用ガイド
+- [`doc/DOC-MAP.md`](doc/DOC-MAP.md) — 全ドキュメントの地図
+
 ## 構成
 
 ```

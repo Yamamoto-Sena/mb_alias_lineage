@@ -208,16 +208,26 @@ INDEX_HTML = """<!DOCTYPE html>
   .def-table { width: 100%; border-collapse: collapse; }
   .def-table th, .def-table td { text-align: left; padding: 5px 6px; font-size: 12px; border-bottom: 1px solid var(--border); }
   .def-table tr.highlight td { background: var(--highlight-bg); font-weight: 600; }
+  /* DD-021論点3: データ型が数値コードの場合、Dr.Sum内部コードであることを示す注記 */
+  .type-code-note { color: var(--text-sub); font-size: 11px; margin-left: 4px; cursor: help; border-bottom: 1px dotted var(--text-sub); }
 
   /* 論点3(DD-020): 使用ボード列 = ボード名｜表示名、以降の表示名は下に重ねる */
-  .board-group { margin: 0 0 8px; }
-  .board-group:last-child { margin-bottom: 0; }
-  .board-row { display: flex; gap: 6px; align-items: baseline; }
+  /* DD-021論点1: セル全体をグリッド化し、ボード名列の幅を揃えて区切り線・表示名の開始位置を揃える */
+  .board-cell { display: grid; grid-template-columns: max-content auto; column-gap: 6px; row-gap: 8px; align-items: baseline; }
+  .board-group { display: contents; }
   .board-name { font-weight: 600; white-space: nowrap; }
-  .board-row .sep { color: var(--text-sub); }
+  .board-name .sep { color: var(--text-sub); font-weight: 400; margin-left: 2px; }
   .alias-list { display: flex; flex-direction: column; }
   .alias-list .alias-line.calc { color: var(--text-sub); }
-  .board-list-more { color: var(--text-sub); }
+  /* DD-021論点2: 「他N件」を全表示/省略表示切り替えボタンにする */
+  .board-list-rest { display: contents; }
+  .board-list-rest.board-list-collapsed { display: none; }
+  .board-list-toggle {
+    grid-column: 1 / -1; justify-self: start;
+    font-size: 11px; color: var(--accent); background: var(--accent-bg); border: none;
+    border-radius: 6px; padding: 2px 8px; cursor: pointer;
+  }
+  .board-list-toggle:hover { text-decoration: underline; }
 
   .connect-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px,1fr)); gap: 8px 16px; margin-bottom: 10px; }
   .connect-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-sub); }
@@ -863,12 +873,14 @@ function buildBoardAliasMap(boardDetails) {
 }
 
 // ボード名を1行目(｜区切り)に、同ボードの表示名(2件目以降)・計算式使用分をその下に重ねて表示する(DD-020)
+// ボード名＋区切り線を1個のグリッドアイテムにまとめ、呼び出し元の.board-cellグリッドで
+// 複数ボード間のボード名列の幅を揃える(DD-021論点1)
 function renderBoardGroup(name, entry) {
   const lines = [...Array.from(entry.alias), ...Array.from(entry.calc).map(c => `計算式: ${c}`)];
   const aliasHtml = lines.map(l => `<div class="alias-line${l.startsWith('計算式: ') ? ' calc' : ''}">${escapeHtml(l)}</div>`).join('');
-  return `<div class="board-group"><div class="board-row">` +
-    `<span class="board-name">${escapeHtml(name)}</span><span class="sep">｜</span>` +
-    `<div class="alias-list">${aliasHtml}</div></div></div>`;
+  return `<div class="board-group">` +
+    `<span class="board-name">${escapeHtml(name)}<span class="sep">｜</span></span>` +
+    `<div class="alias-list">${aliasHtml}</div></div>`;
 }
 
 function formatBoardText(name, entry) {
@@ -882,7 +894,8 @@ function renderBoardsCell(r) {
   const details = boardAliasesByColumn[normalizeKey(r.table_name, r.column_name)] || [];
   if (details.length === 0) {
     if (!r.boards.length) return '-';
-    return r.boards.map(b => renderBoardGroup(b, { alias: new Set(), calc: new Set() })).join('');
+    const allGroups = r.boards.map(b => renderBoardGroup(b, { alias: new Set(), calc: new Set() })).join('');
+    return `<div class="board-cell">${allGroups}</div>`;
   }
   const byBoard = new Map();
   details.forEach(d => {
@@ -891,12 +904,17 @@ function renderBoardsCell(r) {
     (d.usage_type === 'calc' ? entry.calc : entry.alias).add(d.display_name);
   });
   const boardNames = Array.from(byBoard.keys());
-  // 件数が多い場合は先頭3件のみ表示し、残りは件数のみ示す(フルの一覧はtitleホバーで見られる、DD-018踏襲)
+  // 件数が多い場合は先頭3件のみ表示し、残りは「他N件」ボタンで全表示/省略表示を切り替える(DD-018→DD-021論点2)
   const groups = boardNames.slice(0, 3).map(name => renderBoardGroup(name, byBoard.get(name))).join('');
-  const restCount = boardNames.length - 3;
-  const restItem = restCount > 0 ? `<div class="board-list-more">他${restCount}件</div>` : '';
+  const restNames = boardNames.slice(3);
   const fullTitle = boardNames.map(name => formatBoardText(name, byBoard.get(name))).join('\\n');
-  return `<div title="${escapeHtml(fullTitle)}">${groups}${restItem}</div>`;
+  let restHtml = '';
+  if (restNames.length > 0) {
+    const restGroups = restNames.map(name => renderBoardGroup(name, byBoard.get(name))).join('');
+    restHtml = `<div class="board-list-rest board-list-collapsed">${restGroups}</div>` +
+      `<button type="button" class="board-list-toggle" data-count="${restNames.length}">他${restNames.length}件 すべて表示</button>`;
+  }
+  return `<div class="board-cell" title="${escapeHtml(fullTitle)}">${groups}${restHtml}</div>`;
 }
 
 const MAIN_COLUMN_DEFS = {
@@ -988,6 +1006,15 @@ mainThead.addEventListener('click', (e) => {
   applyFilters();
 });
 
+// DD-021論点3: Dr.Sum実機ではdata_typeが内部の数値コードのまま返ってくることがあり、
+// 型名への対応表は未確認(doc/decisions.md D-004)のため変換はせず、数値コードである旨の注記を添える
+function formatDataType(dataType) {
+  if (dataType === null || dataType === undefined || dataType === '') return '-';
+  const text = String(dataType);
+  if (!/^-?\\d+$/.test(text.trim())) return escapeHtml(text);
+  return `${escapeHtml(text)}<span class="type-code-note" title="Dr.Sum内部の数値コードです。型名への変換は未対応のため、実際のデータ型はDr.Sum管理画面でご確認ください">(内部コード)</span>`;
+}
+
 // 論点1(DD-020): 物理カラム名クリック→テーブル定義サイドパネル(横の空きスペース、無ければ一覧下にインライン表示)
 function openTableDefPanel(table, column) {
   const defs = allRows
@@ -998,7 +1025,7 @@ function openTableDefPanel(table, column) {
   document.getElementById('table-def-sub').textContent = `${defs.length}カラム中、クリックしたカラムを強調表示`;
   document.getElementById('table-def-tbody').innerHTML = defs.map(c => {
     const hl = c.column_name === column ? ' class="highlight"' : '';
-    return `<tr${hl}><td><code>${escapeHtml(c.column_name)}</code></td><td>${escapeHtml(c.data_type || '-')}</td></tr>`;
+    return `<tr${hl}><td><code>${escapeHtml(c.column_name)}</code></td><td>${formatDataType(c.data_type)}</td></tr>`;
   }).join('');
   document.querySelectorAll('.col-link').forEach(el => el.classList.remove('active'));
   document.querySelectorAll(`.col-link[data-table="${CSS.escape(table)}"][data-column="${CSS.escape(column)}"]`)
@@ -1036,8 +1063,19 @@ window.addEventListener('resize', positionTableDefPanel);
 document.getElementById('table-def-close').addEventListener('click', closeTableDefPanel);
 document.getElementById('tbody').addEventListener('click', (e) => {
   const link = e.target.closest('.col-link');
-  if (!link) return;
-  openTableDefPanel(link.dataset.table, link.dataset.column);
+  if (link) {
+    openTableDefPanel(link.dataset.table, link.dataset.column);
+    return;
+  }
+  // DD-021論点2: 使用ボード欄の「他N件」ボタンで全表示/省略表示を切り替える
+  const toggleBtn = e.target.closest('.board-list-toggle');
+  if (toggleBtn) {
+    const cell = toggleBtn.closest('.board-cell');
+    const rest = cell && cell.querySelector('.board-list-rest');
+    if (!rest) return;
+    const collapsed = rest.classList.toggle('board-list-collapsed');
+    toggleBtn.textContent = collapsed ? `他${toggleBtn.dataset.count}件 すべて表示` : '折りたたむ';
+  }
 });
 
 function applyFilters() {

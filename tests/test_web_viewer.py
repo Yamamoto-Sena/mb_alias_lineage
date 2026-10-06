@@ -45,6 +45,13 @@ def test_fetch_data_single_alias(tmp_path):
     assert row["boards"] == ["board1"]
 
 
+def test_fetch_data_includes_data_type(tmp_path):
+    # DD-020: 物理カラム名クリック時のテーブル定義パネルでデータ型を表示するため
+    db_path = _make_db(tmp_path, [(1, "T_A", "COL1", [("表示A", "board1")])])
+    result = wv.fetch_data(db_path)
+    assert result[0]["data_type"] == "VARCHAR"
+
+
 def test_fetch_data_naming_variants(tmp_path):
     db_path = _make_db(tmp_path, [(1, "T_A", "COL1", [("表示A", "board1"), ("表示B", "board2")])])
     result = wv.fetch_data(db_path)

@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DD-020 モック: メイン一覧の操作性改善3件</title>
+<style>
+  :root {
+    --bg: #f7f7f8;
+    --surface: #ffffff;
+    --border: #e3e3e6;
+    --text: #1f1f23;
+    --text-sub: #6b6b74;
+    --accent: #4f46e5;
+    --accent-bg: #eef0fd;
+    --warn: #b45309;
+    --warn-bg: #fef3e2;
+    --highlight-bg: #fff3b0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, "Segoe UI", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
+  }
+  .mock-banner {
+    background: #1f1f23; color: #fff; font-size: 13px; padding: 8px 16px; text-align: center;
+  }
+  .mock-banner b { color: #ffd166; }
+  .page {
+    position: relative;
+    max-width: 1680px;
+    margin: 0 auto;
+    padding: 32px 24px 64px;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; }
+  h1 { font-size: 19px; font-weight: 600; margin: 0 0 4px; }
+  .sub { color: var(--text-sub); font-size: 13px; margin: 0 0 20px; }
+  h2.section-title { font-size: 14px; font-weight: 600; margin: 28px 0 8px; }
+
+  table { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 13px; vertical-align: top; }
+  th { background: #fafafa; font-weight: 600; user-select: none; }
+  tr:last-child td { border-bottom: none; }
+
+  /* --- 論点2: 列ドラッグ並び替え --- */
+  th[draggable="true"] { cursor: grab; }
+  th.dragging { opacity: 0.4; }
+  th.drop-target { outline: 2px dashed var(--accent); outline-offset: -2px; }
+  .th-row { display: flex; align-items: center; gap: 6px; }
+  .drag-handle { color: var(--text-sub); font-size: 13px; cursor: grab; }
+
+  /* --- 論点1: 物理カラム名クリック --- */
+  code.col-link {
+    cursor: pointer; color: var(--accent); background: var(--accent-bg);
+    padding: 2px 6px; border-radius: 4px; border: none; font: inherit;
+  }
+  code.col-link:hover { text-decoration: underline; }
+  code.col-link.active { background: var(--accent); color: #fff; }
+
+  .side-panel {
+    position: fixed;
+    top: 100px;
+    width: 300px;
+    max-height: calc(100vh - 140px);
+    overflow-y: auto;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+    padding: 14px;
+    display: none;
+  }
+  .side-panel.open { display: block; }
+  .side-panel.inline-mode {
+    position: static;
+    width: auto;
+    max-height: none;
+    margin: 12px 0 0;
+  }
+  .side-panel h3 { margin: 0 0 2px; font-size: 14px; }
+  .side-panel .panel-sub { color: var(--text-sub); font-size: 12px; margin: 0 0 10px; }
+  .side-panel .close-btn {
+    float: right; border: none; background: none; cursor: pointer; font-size: 15px; color: var(--text-sub);
+  }
+  .def-table { width: 100%; border-collapse: collapse; }
+  .def-table th, .def-table td { padding: 5px 6px; font-size: 12px; border-bottom: 1px solid var(--border); }
+  .def-table tr.highlight td { background: var(--highlight-bg); font-weight: 600; }
+
+  /* --- 論点3: 使用ボード列の新表示形式 --- */
+  .board-group { margin: 0 0 8px; }
+  .board-group:last-child { margin-bottom: 0; }
+  .board-row { display: flex; gap: 6px; align-items: baseline; }
+  .board-name { font-weight: 600; white-space: nowrap; }
+  .sep { color: var(--text-sub); }
+  .alias-list { display: flex; flex-direction: column; }
+  .alias-list .alias-line:first-child { }
+  .alias-list .alias-line.calc { color: var(--text-sub); }
+
+  .badge { display: inline-block; padding: 1px 6px; border-radius: 10px; background: var(--accent-bg); color: var(--accent); font-size: 11px; margin: 0 4px 2px 0; }
+  .badge.warn { background: var(--warn-bg); color: var(--warn); }
+
+  .note { background: var(--accent-bg); border: 1px solid #c7cbf7; border-radius: 8px; padding: 10px 14px; font-size: 12.5px; margin-bottom: 16px; }
+  .note b { color: var(--accent); }
+
+  @media (max-width: 1360px) {
+    .side-panel:not(.inline-mode) { display: none !important; }
+  }
+</style>
+</head>
+<body>
+<div class="mock-banner">DD-020 モック（<b>レビュー用・実データではありません</b>） — ウィンドウを狭くすると論点1のパネルが一覧の下に折り返される挙動も確認できます</div>
+
+<div class="page">
+  <div class="wrap">
+    <h1>カラム・エイリアス使用状況マップ（モック抜粋）</h1>
+    <p class="sub">実装対象: web_viewer.py のメイン一覧テーブル相当。サンプルデータ3カラム分のみ抜粋。</p>
+
+    <div class="note">
+      <b>論点1</b>: 物理カラム名（水色の<code>&lt;code&gt;</code>）をクリック → 右の空きスペースにテーブル定義パネルが開き、該当行を黄色で強調。<br>
+      <b>論点2</b>: 列見出しをドラッグ&ドロップで好きな位置へ移動（←/→ボタンは廃止しドラッグのみに統一）。<br>
+      <b>論点3</b>: 「使用ボード」列は「ボード名｜表示名」を1行目、同ボードの追加表示名はその下に表示名のみを重ねる形式。
+    </div>
+
+    <h2 class="section-title">メイン一覧（抜粋）</h2>
+    <table id="main-table">
+      <thead>
+        <tr id="main-thead-row"></tr>
+      </thead>
+      <tbody id="main-tbody"></tbody>
+    </table>
+  </div>
+
+  <div class="side-panel" id="side-panel">
+    <button class="close-btn" id="panel-close" title="閉じる">×</button>
+    <h3 id="panel-title">テーブル定義</h3>
+    <p class="panel-sub" id="panel-sub"></p>
+    <table class="def-table">
+      <thead><tr><th>物理カラム名</th><th>データ型</th></tr></thead>
+      <tbody id="panel-tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+// ---- サンプルデータ ----
+const TABLE_DEFS = {
+  'T_ORDER': [
+    { column_name: 'ORDER_ID', data_type: 'NUMBER' },
+    { column_name: 'ORDER_DATE', data_type: 'DATE' },
+    { column_name: 'CUSTOMER_CD', data_type: 'VARCHAR' },
+    { column_name: 'AMOUNT', data_type: 'NUMBER' },
+    { column_name: 'STATUS', data_type: 'VARCHAR' },
+  ],
+  'T_CUSTOMER': [
+    { column_name: 'CUSTOMER_CD', data_type: 'VARCHAR' },
+    { column_name: 'CUSTOMER_NAME', data_type: 'VARCHAR' },
+    { column_name: 'ADDRESS', data_type: 'VARCHAR' },
+  ],
+};
+
+const ROWS = [
+  {
+    table_name: 'T_ORDER', column_name: 'ORDER_DATE',
+    display_names: ['受注日', '受注年月日'], warn: true,
+    usage_count: 3,
+    boards: [
+      { board_name: '受注一覧', alias: ['受注日'], calc: [] },
+      { board_name: '月次実績', alias: ['受注年月日'], calc: ['受注日(月)'] },
+    ],
+  },
+  {
+    table_name: 'T_ORDER', column_name: 'CUSTOMER_CD',
+    display_names: ['顧客コード'], warn: false,
+    usage_count: 3,
+    boards: [
+      { board_name: '受注一覧', alias: ['顧客コード'], calc: [] },
+      { board_name: '顧客管理', alias: ['顧客CD'], calc: [] },
+      { board_name: '月次実績', alias: ['取引先コード'], calc: [] },
+    ],
+  },
+  {
+    table_name: 'T_CUSTOMER', column_name: 'CUSTOMER_NAME',
+    display_names: ['顧客名'], warn: false,
+    usage_count: 1,
+    boards: [
+      { board_name: '顧客管理', alias: ['顧客名'], calc: [] },
+    ],
+  },
+];
+
+const COLUMN_DEFS = {
+  table_name: { label: 'テーブル/ビュー', width: '16%', cell: r => escapeHtml(r.table_name) },
+  column_name: { label: '物理カラム名', width: '14%', cell: r => `<code class="col-link" data-table="${r.table_name}" data-column="${r.column_name}">${escapeHtml(r.column_name)}</code>` },
+  display_name: { label: '表示名(エイリアス)', width: '26%', cell: renderDisplayNameCell },
+  usage_count: { label: '使用件数', width: '8%', cell: r => `${r.usage_count}件` },
+  boards: { label: '使用ボード(実際のエイリアス名)', width: '36%', cell: renderBoardsCell },
+};
+
+let columnOrder = ['table_name', 'column_name', 'display_name', 'usage_count', 'boards'];
+let activeCol = null; // { table_name, column_name }
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function renderDisplayNameCell(r) {
+  return r.display_names.map(n => `<span class="badge ${r.warn ? 'warn' : ''}">${escapeHtml(n)}</span>`).join('');
+}
+
+// 論点3: ボード名｜表示名 を1行目、同ボードの追加表示名/計算式はその下に重ねる
+function renderBoardsCell(r) {
+  return r.boards.map(b => {
+    const lines = [];
+    (b.alias || []).forEach((a, i) => lines.push(`<div class="alias-line">${i === 0 ? '' : ''}${escapeHtml(a)}</div>`));
+    (b.calc || []).forEach(c => lines.push(`<div class="alias-line calc">計算式: ${escapeHtml(c)}</div>`));
+    const [first, ...rest] = lines;
+    return `
+      <div class="board-group">
+        <div class="board-row">
+          <span class="board-name">${escapeHtml(b.board_name)}</span>
+          <span class="sep">｜</span>
+          <div class="alias-list">${first || ''}${rest.join('')}</div>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function renderTableHeader() {
+  const headRow = document.getElementById('main-thead-row');
+  headRow.innerHTML = columnOrder.map((key) => {
+    const def = COLUMN_DEFS[key];
+    return `<th style="width:${def.width}" draggable="true" data-col="${key}">
+      <div class="th-row">
+        <span class="drag-handle" title="ドラッグで並び替え">⠿</span>
+        <span class="th-label">${def.label}</span>
+      </div>
+    </th>`;
+  }).join('');
+  attachDragHandlers();
+}
+
+function renderTableBody() {
+  const tbody = document.getElementById('main-tbody');
+  tbody.innerHTML = ROWS.map(r => {
+    return `<tr>${columnOrder.map(key => `<td>${COLUMN_DEFS[key].cell(r)}</td>`).join('')}</tr>`;
+  }).join('');
+  attachColumnLinkHandlers();
+}
+
+function renderAll() {
+  renderTableHeader();
+  renderTableBody();
+}
+
+// ---- 論点2: 列ドラッグ並び替え ----
+function attachDragHandlers() {
+  let dragKey = null;
+  document.querySelectorAll('#main-thead-row th').forEach(th => {
+    th.addEventListener('dragstart', (e) => {
+      dragKey = th.dataset.col;
+      th.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    th.addEventListener('dragend', () => {
+      th.classList.remove('dragging');
+      document.querySelectorAll('#main-thead-row th').forEach(t => t.classList.remove('drop-target'));
+    });
+    th.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      if (th.dataset.col !== dragKey) th.classList.add('drop-target');
+    });
+    th.addEventListener('dragleave', () => th.classList.remove('drop-target'));
+    th.addEventListener('drop', (e) => {
+      e.preventDefault();
+      th.classList.remove('drop-target');
+      const targetKey = th.dataset.col;
+      if (!dragKey || dragKey === targetKey) return;
+      const from = columnOrder.indexOf(dragKey);
+      const to = columnOrder.indexOf(targetKey);
+      columnOrder.splice(from, 1);
+      columnOrder.splice(to, 0, dragKey);
+      renderAll();
+    });
+  });
+}
+
+// ---- 論点1: 物理カラム名クリック → テーブル定義サイドパネル ----
+function attachColumnLinkHandlers() {
+  document.querySelectorAll('.col-link').forEach(el => {
+    el.addEventListener('click', () => {
+      const table = el.dataset.table;
+      const column = el.dataset.column;
+      document.querySelectorAll('.col-link').forEach(e => e.classList.remove('active'));
+      el.classList.add('active');
+      openPanel(table, column);
+    });
+  });
+}
+
+function openPanel(table, column) {
+  activeCol = { table, column };
+  const panel = document.getElementById('side-panel');
+  const defs = TABLE_DEFS[table] || [];
+  document.getElementById('panel-title').textContent = `テーブル定義: ${table}`;
+  document.getElementById('panel-sub').textContent = `${defs.length}カラム中、クリックしたカラムを強調表示`;
+  document.getElementById('panel-tbody').innerHTML = defs.map(c => {
+    const hl = c.column_name === column ? 'highlight' : '';
+    return `<tr class="${hl}"><td><code>${escapeHtml(c.column_name)}</code></td><td>${escapeHtml(c.data_type)}</td></tr>`;
+  }).join('');
+  panel.classList.add('open');
+  positionPanel();
+}
+
+function closePanel() {
+  activeCol = null;
+  document.getElementById('side-panel').classList.remove('open');
+  document.querySelectorAll('.col-link').forEach(e => e.classList.remove('active'));
+}
+
+document.getElementById('panel-close').addEventListener('click', closePanel);
+
+// 画面幅が十分あれば.wrapの右の空きスペースに固定表示、狭ければ一覧の下にインライン表示
+function positionPanel() {
+  const panel = document.getElementById('side-panel');
+  if (!panel.classList.contains('open')) return;
+  const wrap = document.querySelector('.wrap');
+  const wrapRect = wrap.getBoundingClientRect();
+  const spaceRight = window.innerWidth - wrapRect.right;
+  const needed = 300 + 40;
+  if (spaceRight >= needed) {
+    panel.classList.remove('inline-mode');
+    panel.style.left = (wrapRect.right + 24) + 'px';
+    panel.style.right = 'auto';
+    if (panel.parentElement.id !== 'panel-anchor-root') {
+      document.querySelector('.page').appendChild(panel);
+    }
+  } else {
+    panel.classList.add('inline-mode');
+    panel.style.left = '';
+    panel.style.right = '';
+    const wrapEl = document.querySelector('.wrap');
+    wrapEl.appendChild(panel);
+  }
+}
+
+window.addEventListener('resize', positionPanel);
+
+renderAll();
+</script>
+</body>
+</html>

@@ -45,6 +45,7 @@ INDEX_HTML = """<!DOCTYPE html>
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>カラム・エイリアス使用状況マップ</title>
 <style>
   :root {
@@ -57,6 +58,7 @@ INDEX_HTML = """<!DOCTYPE html>
     --accent-bg: #eef0fd;
     --warn: #b45309;
     --warn-bg: #fef3e2;
+    --highlight-bg: #fff3b0;
   }
   * { box-sizing: border-box; }
   body {
@@ -68,6 +70,10 @@ INDEX_HTML = """<!DOCTYPE html>
   .wrap { max-width: 980px; margin: 0 auto; padding: 32px 24px 64px; }
   h1 { font-size: 19px; font-weight: 600; margin: 0 0 4px; }
   .sub { color: var(--text-sub); font-size: 13px; margin: 0 0 24px; }
+  .large-warning {
+    background: var(--warn-bg); color: var(--warn); border: 1px solid #f3cf9a;
+    border-radius: 8px; padding: 10px 14px; font-size: 13px; margin: 0 0 20px;
+  }
   .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px,1fr)); gap: 12px; margin-bottom: 24px; }
   .card {
     background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
@@ -121,13 +127,14 @@ INDEX_HTML = """<!DOCTYPE html>
   .drilldown-count { font-size: 12px; color: var(--text-sub); white-space: nowrap; }
   .drilldown-hint { text-align: center; padding: 32px; color: var(--text-sub); font-size: 13px; }
 
-  .wl-btn, .wl-remove-btn, .wl-confirm-btn, .wl-cancel-btn {
+  .wl-btn, .wl-remove-btn, .wl-confirm-btn, .wl-cancel-btn, .wl-del-confirm-btn, .wl-del-cancel-btn {
     font-size: 11px; border: none; border-radius: 6px; padding: 3px 8px;
     cursor: pointer; white-space: nowrap; margin-left: 6px;
   }
   .wl-btn, .wl-confirm-btn { color: var(--accent); background: var(--accent-bg); }
-  .wl-remove-btn { color: #b91c1c; background: #fde8e8; }
-  .wl-cancel-btn { color: var(--text-sub); background: #ececef; }
+  .wl-remove-btn, .wl-del-confirm-btn { color: #b91c1c; background: #fde8e8; }
+  .wl-cancel-btn, .wl-del-cancel-btn { color: var(--text-sub); background: #ececef; }
+  .wl-del-confirm-label { font-size: 12px; color: var(--warn); }
   .wl-reason-input {
     font-size: 12px; padding: 2px 6px; border: 1px solid var(--border); border-radius: 6px;
     width: 140px; margin-left: 6px;
@@ -144,6 +151,11 @@ INDEX_HTML = """<!DOCTYPE html>
     padding: 14px 16px; margin-bottom: 20px; font-size: 13px;
   }
   .upload-hint { color: var(--text-sub); margin: 0 0 10px; }
+  .upload-file-fields {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(240px,1fr)); gap: 8px 16px;
+    margin-bottom: 10px;
+  }
+  .upload-file-fields label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-sub); }
   .upload-panel input[type=file] { font-size: 12px; margin-right: 8px; }
   .upload-panel .load-btn {
     font-size: 12px; padding: 6px 14px; border: none; border-radius: 6px; cursor: pointer;
@@ -154,8 +166,8 @@ INDEX_HTML = """<!DOCTYPE html>
   .update-hint summary { cursor: pointer; color: var(--accent); font-weight: 500; }
   .update-hint p { margin: 8px 0 0; line-height: 1.7; }
   .update-hint pre {
-    margin: 8px 0 0; padding: 10px 12px; background: var(--accent-bg); color: var(--accent);
-    border-radius: 6px; font-size: 11px; overflow-x: auto; white-space: pre-wrap; word-break: break-all;
+    margin: 8px 0 0; padding: 12px 14px; background: var(--accent-bg); color: var(--accent);
+    border-radius: 6px; font-size: 15px; line-height: 1.6; overflow-x: auto; white-space: pre-wrap; word-break: break-all;
   }
   .update-hint-form {
     display: grid; grid-template-columns: repeat(auto-fit, minmax(200px,1fr)); gap: 8px 12px;
@@ -171,12 +183,42 @@ INDEX_HTML = """<!DOCTYPE html>
   thead th[data-sort-col] { cursor: pointer; user-select: none; white-space: nowrap; }
   thead th[data-sort-col]:hover { color: var(--accent); }
   .sort-arrow { display: inline-block; min-width: 10px; margin-left: 3px; font-size: 10px; color: var(--accent); }
-  .col-move-buttons { display: inline-block; margin-right: 4px; }
-  .col-move-btn {
-    font-size: 10px; line-height: 1; border: 1px solid var(--border); border-radius: 4px;
-    background: var(--surface); color: var(--text-sub); cursor: pointer; padding: 2px 4px; margin-right: 2px;
+  thead th[draggable="true"] { cursor: grab; }
+  thead th.col-dragging { opacity: .4; }
+  thead th.col-drop-target { outline: 2px dashed var(--accent); outline-offset: -2px; }
+  .drag-handle { display: inline-block; margin-right: 4px; color: var(--text-sub); cursor: grab; }
+
+  /* 論点1(DD-020): 物理カラム名クリック→テーブル定義サイドパネル */
+  code.col-link {
+    cursor: pointer; color: var(--accent); background: var(--accent-bg);
+    border: none; font: inherit; padding: 2px 6px; border-radius: 4px;
   }
-  .col-move-btn:hover { color: var(--accent); border-color: var(--accent); }
+  code.col-link:hover { text-decoration: underline; }
+  code.col-link.active { background: var(--accent); color: #fff; }
+  .side-panel {
+    position: fixed; top: 100px; width: 300px; max-height: calc(100vh - 140px); overflow-y: auto;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.08); padding: 14px; font-size: 13px; display: none;
+  }
+  .side-panel.open { display: block; }
+  .side-panel.inline-mode { position: static; width: auto; max-height: none; margin: 16px 0 0; }
+  .side-panel h3 { margin: 0 0 2px; font-size: 14px; }
+  .side-panel .panel-sub { color: var(--text-sub); font-size: 12px; margin: 0 0 10px; }
+  .side-panel .close-btn { float: right; border: none; background: none; cursor: pointer; font-size: 15px; color: var(--text-sub); }
+  .def-table { width: 100%; border-collapse: collapse; }
+  .def-table th, .def-table td { text-align: left; padding: 5px 6px; font-size: 12px; border-bottom: 1px solid var(--border); }
+  .def-table tr.highlight td { background: var(--highlight-bg); font-weight: 600; }
+
+  /* 論点3(DD-020): 使用ボード列 = ボード名｜表示名、以降の表示名は下に重ねる */
+  .board-group { margin: 0 0 8px; }
+  .board-group:last-child { margin-bottom: 0; }
+  .board-row { display: flex; gap: 6px; align-items: baseline; }
+  .board-name { font-weight: 600; white-space: nowrap; }
+  .board-row .sep { color: var(--text-sub); }
+  .alias-list { display: flex; flex-direction: column; }
+  .alias-list .alias-line.calc { color: var(--text-sub); }
+  .board-list-more { color: var(--text-sub); }
+
   .connect-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px,1fr)); gap: 8px 16px; margin-bottom: 10px; }
   .connect-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-sub); }
   .connect-form input {
@@ -189,6 +231,7 @@ INDEX_HTML = """<!DOCTYPE html>
 <div class="wrap">
   <h1>カラム・エイリアス使用状況マップ</h1>
   <p class="sub">Dr.Sum物理カラム ⇔ MotionBoard表示名の対応関係(lineage.dbより)</p>
+  <div id="large-dataset-warning" class="large-warning" style="display:none;"></div>
 
   <details class="update-hint">
     <summary>🔧 データを更新するには</summary>
@@ -209,7 +252,6 @@ INDEX_HTML = """<!DOCTYPE html>
   </details>
 
   <div class="mode-toggle">
-    <button class="mode-btn active" id="mode-demo-btn">このデータを見る</button>
     <button class="mode-btn" id="mode-upload-btn">実データをアップロードして見る</button>
     <button class="mode-btn" id="mode-connect-btn">Dr.Sumに接続</button>
   </div>
@@ -219,8 +261,10 @@ INDEX_HTML = """<!DOCTYPE html>
       ファイルはこのブラウザの中だけで処理され、どこにも送信されません。
       <code>naming_whitelist.json</code>は任意です(登録内容の閲覧のみ。追加・削除はこのモードでは行えません)。
     </p>
-    <input type="file" id="db-file-input" accept=".db">
-    <input type="file" id="whitelist-file-input" accept=".json">
+    <div class="upload-file-fields">
+      <label>①lineage.dbファイル(必須) <input type="file" id="db-file-input" accept=".db"></label>
+      <label>②ホワイトリストファイル(naming_whitelist.json・任意) <input type="file" id="whitelist-file-input" accept=".json"></label>
+    </div>
     <button class="load-btn" id="load-uploaded-btn">読み込む</button>
     <div id="upload-status"></div>
   </div>
@@ -258,6 +302,7 @@ INDEX_HTML = """<!DOCTYPE html>
     <tbody id="tbody"></tbody>
   </table>
   <div id="empty" class="empty" style="display:none">該当するカラムがありません</div>
+  <div id="table-def-inline-anchor"></div>
 
   <h2 title="異なる物理カラムに同じ表示名が使われている候補です(意図的な使い回しか表記の混同かは目視確認が必要です)">多対1マッピング候補</h2>
   <table>
@@ -320,6 +365,16 @@ INDEX_HTML = """<!DOCTYPE html>
   </table>
 </div>
 
+<div class="side-panel" id="table-def-panel">
+  <button class="close-btn" id="table-def-close" type="button" title="閉じる">×</button>
+  <h3 id="table-def-title">テーブル定義</h3>
+  <p class="panel-sub" id="table-def-sub"></p>
+  <table class="def-table">
+    <thead><tr><th>物理カラム名</th><th>データ型</th></tr></thead>
+    <tbody id="table-def-tbody"></tbody>
+  </table>
+</div>
+
 <script>
 let STATIC_EXPORT = false; // export_static.pyが埋め込みビルド時にtrueへ書き換える
 let UPLOADED_MODE = false; // 実データアップロードモード中はtrue(DD-006)。編集ボタンを無効化する
@@ -328,6 +383,22 @@ let activeCardFilter = null; // null | 'naming' | 'unaliased' | 'orphan'
 let sortColumn = null; // null | 'table_name' | 'column_name' | 'display_name' | 'usage_count' | 'boards'
 let sortDirection = 'asc'; // 'asc' | 'desc'
 let columnOrder = ['table_name', 'column_name', 'display_name', 'usage_count', 'boards']; // 表示上の列の並び順(左→右)
+let selectedBoardName = ''; // ボード別ドリルダウンで選択中のボード名(DD-014: データ再読込後も選択状態を保持するため)
+
+// Python側のLARGE_DATASET_WARNING_THRESHOLD(web_viewer.py)と同じ値に保つこと(DD-014)
+const LARGE_DATASET_WARNING_THRESHOLD = 3000;
+
+function updateLargeDatasetWarning(rowCount) {
+  const el = document.getElementById('large-dataset-warning');
+  if (!el) return;
+  if (rowCount > LARGE_DATASET_WARNING_THRESHOLD) {
+    el.textContent = `※ カラム数が${rowCount}件と多いため、ブラウザでの表示が重くなる可能性があります` +
+      `(現時点ではページネーション未対応です)`;
+    el.style.display = 'block';
+  } else {
+    el.style.display = 'none';
+  }
+}
 
 // ============================================================
 // 類似度アルゴリズム(difflib.SequenceMatcher.ratioの移植、DD-006)
@@ -396,7 +467,7 @@ function normalizeKey(tableName, columnName) {
 
 function jsFetchData(db, whitelistSet) {
   const res = db.exec(`
-    SELECT c.id, c.table_name, c.column_name,
+    SELECT c.id, c.table_name, c.column_name, c.data_type,
            GROUP_CONCAT(DISTINCT CASE WHEN a.usage_type='alias' THEN a.display_name END) AS display_names,
            GROUP_CONCAT(DISTINCT CASE WHEN a.usage_type='calc' THEN a.display_name END) AS calc_names,
            COUNT(DISTINCT CASE WHEN a.usage_type='alias' THEN a.display_name END) AS alias_count,
@@ -409,11 +480,11 @@ function jsFetchData(db, whitelistSet) {
   `);
   if (!res.length) return [];
   return res[0].values.map(row => {
-    const [id, table_name, column_name, displayNamesRaw, calcNamesRaw, aliasCount, usageCount, boardsRaw] = row;
+    const [id, table_name, column_name, data_type, displayNamesRaw, calcNamesRaw, aliasCount, usageCount, boardsRaw] = row;
     const display_names = displayNamesRaw ? displayNamesRaw.split(",") : [];
     const isWhitelisted = whitelistSet.has(normalizeKey(table_name, column_name));
     return {
-      id, table_name, column_name, display_names,
+      id, table_name, column_name, data_type, display_names,
       calc_names: calcNamesRaw ? calcNamesRaw.split(",") : [],
       alias_count: aliasCount || 0,
       usage_count: usageCount || 0,
@@ -542,8 +613,10 @@ async function handleLoadUploaded() {
     const patterns = jsFetchCrossColumnPatterns(db, whitelistSet, 0.8);
     const boardDetails = jsFetchBoardDetails(db);
     lastPatterns = patterns;
+    buildBoardAliasMap(boardDetails);
     sortColumn = null;
     renderTableHeader();
+    updateLargeDatasetWarning(allRows.length);
     renderCards(allRows, patterns);
     renderTable(allRows);
     renderManyToOne(patterns.many_to_one || []);
@@ -562,16 +635,32 @@ const CARD_DEFS = [
   { key: "naming", label: "表記ゆれ候補", value: (rows) => rows.filter(r => r.is_naming_variant).length,
     tooltip: "同じ物理カラムに、表記の異なる表示名が複数使われている可能性がある項目の件数です" },
   { key: null, label: "使用箇所(延べ)", value: (rows) => rows.reduce((sum, r) => sum + (r.usage_count || 0), 0) },
-  { key: null, label: "カスタム項目/計算式で使用", value: (rows) => rows.filter(r => r.calc_names && r.calc_names.length > 0).length },
+  { key: "calc", label: "カスタム項目/計算式で使用", value: (rows) => rows.filter(r => r.calc_names && r.calc_names.length > 0).length,
+    tooltip: "MotionBoardのカスタム項目・計算式の中でこの物理カラムが参照されている件数です" },
   { key: "unaliased", label: "物理名そのまま", value: (rows) => rows.filter(r => r.is_unaliased).length,
     tooltip: "表示名が設定されず、物理カラム名がそのままMotionBoardの画面に表示されている項目の件数です" },
   { key: "orphan", label: "未使用カラム", value: (rows) => rows.filter(r => r.is_orphan).length,
     tooltip: "Dr.Sum上には存在するが、MotionBoardのどのボードからも参照されていない物理カラムの件数です" },
-  { key: null, label: "多対1候補", value: (rows, patterns) => (patterns.many_to_one || []).length,
+  { key: "many_to_one", label: "多対1候補", value: (rows, patterns) => (patterns.many_to_one || []).length,
     tooltip: "異なる物理カラムに同じ表示名が使われている候補の件数です(意図的な使い回しか表記の混同かは目視確認が必要です)" },
-  { key: null, label: "類似度候補", value: (rows, patterns) => (patterns.similar_pairs || []).length,
+  { key: "similar", label: "類似度候補", value: (rows, patterns) => (patterns.similar_pairs || []).length,
     tooltip: "表記が似ている表示名の組を機械的に検出した候補の件数です(実際に同じ意味かは目視確認が必要です)" },
 ];
+
+// サーバーモード・静的配布モード(export_static.py)で共通の描画処理。検索語・カード絞り込み・
+// 列ソート・列並び替え・ドリルダウン選択中のボードは呼び出し元でリセットしない限り保持される(DD-014)
+function renderAll(rows, patterns, boardDetails, whitelistEntries) {
+  allRows = rows;
+  lastPatterns = patterns;
+  buildBoardAliasMap(boardDetails);
+  updateLargeDatasetWarning(allRows.length);
+  renderCards(allRows, patterns);
+  applyFilters();
+  renderManyToOne(patterns.many_to_one || []);
+  renderSimilarPairs(patterns.similar_pairs || []);
+  renderWhitelist(whitelistEntries);
+  initBoardDrilldown(boardDetails);
+}
 
 async function load() {
   const [colRes, patRes, boardRes, whitelistRes] = await Promise.all([
@@ -587,14 +676,7 @@ async function load() {
   if (!patterns || typeof patterns !== 'object' || Array.isArray(patterns)) patterns = {};
   if (!Array.isArray(boardDetails)) boardDetails = [];
   if (!Array.isArray(whitelistEntries)) whitelistEntries = [];
-  allRows = colData;
-  lastPatterns = patterns;
-  renderCards(allRows, patterns);
-  renderTable(allRows);
-  renderManyToOne(patterns.many_to_one || []);
-  renderSimilarPairs(patterns.similar_pairs || []);
-  renderWhitelist(whitelistEntries);
-  initBoardDrilldown(boardDetails);
+  renderAll(colData, patterns, boardDetails, whitelistEntries);
 }
 
 function whitelistAddButton(tableName, columnName) {
@@ -619,10 +701,11 @@ async function submitWhitelistAdd(wrap) {
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({table_name: wrap.dataset.table, column_name: wrap.dataset.column, reason}),
   });
-  location.reload();
+  await load();
 }
 
 function renderCards(rows, patterns) {
+  buildPatternKeySets(patterns);
   document.getElementById('cards').innerHTML = CARD_DEFS.map(def => {
     const clickable = !!def.key;
     const selected = clickable && activeCardFilter === def.key;
@@ -654,11 +737,31 @@ function renderCards(rows, patterns) {
 
 let lastPatterns = {};
 
+// 「多対1候補」「類似度候補」カードのクリック絞り込み用に、該当する物理カラムの
+// キー集合を都度組み立てておく(カードクリックのたびに毎回全件走査しないため、DD-016)
+let manyToOneKeySet = new Set();
+let similarKeySet = new Set();
+
+function buildPatternKeySets(patterns) {
+  manyToOneKeySet = new Set();
+  (patterns.many_to_one || []).forEach(group => {
+    (group.columns || []).forEach(c => manyToOneKeySet.add(normalizeKey(c.table_name, c.column_name)));
+  });
+  similarKeySet = new Set();
+  (patterns.similar_pairs || []).forEach(pair => {
+    similarKeySet.add(normalizeKey(pair.column_a.table_name, pair.column_a.column_name));
+    similarKeySet.add(normalizeKey(pair.column_b.table_name, pair.column_b.column_name));
+  });
+}
+
 function matchesCardFilter(r) {
   if (!activeCardFilter) return true;
   if (activeCardFilter === "naming") return r.is_naming_variant;
   if (activeCardFilter === "unaliased") return r.is_unaliased;
   if (activeCardFilter === "orphan") return r.is_orphan;
+  if (activeCardFilter === "calc") return !!(r.calc_names && r.calc_names.length > 0);
+  if (activeCardFilter === "many_to_one") return manyToOneKeySet.has(normalizeKey(r.table_name, r.column_name));
+  if (activeCardFilter === "similar") return similarKeySet.has(normalizeKey(r.table_name, r.column_name));
   return true;
 }
 
@@ -706,16 +809,36 @@ function sortRows(rows) {
   return rows.slice().sort((a, b) => compareRows(a, b, sortColumn, sortDirection));
 }
 
+// 指定した表示名/計算式名(usageType: 'alias'|'calc')を実際に使っているボード名の一覧を
+// board_detailsから引く(DD-018。表示名バッジのホバーで「どのボードのものか」を出すため)
+function boardNamesForDisplay(r, displayName, usageType) {
+  const details = boardAliasesByColumn[normalizeKey(r.table_name, r.column_name)] || [];
+  const boards = new Set();
+  details.forEach(d => {
+    if (d.display_name === displayName && d.usage_type === usageType) boards.add(d.board_name);
+  });
+  return Array.from(boards);
+}
+
 function renderDisplayNameCell(r) {
   const isWarn = !!r.is_naming_variant;
   const isOrphan = !!r.is_orphan;
   const calcNames = r.calc_names || [];
-  const aliasBadges = r.display_names.map(n =>
-    `<span class="badge ${isWarn ? 'warn' : ''}"${isWarn ? ' title="表記ゆれ候補として検出された表示名です"' : ''}>${escapeHtml(n)}</span>`
-  ).join('');
-  const calcBadges = calcNames.map(n =>
-    `<span class="badge calc" title="カスタム項目・計算式の中でこの物理カラムが参照されています">${escapeHtml(n)}</span>`
-  ).join('');
+  const aliasBadges = r.display_names.map(n => {
+    const boards = boardNamesForDisplay(r, n, 'alias');
+    const lines = [];
+    if (boards.length) lines.push(`使用ボード: ${boards.join(', ')}`);
+    if (isWarn) lines.push('表記ゆれ候補として検出された表示名です');
+    const titleAttr = lines.length ? ` title="${escapeHtml(lines.join('\\n'))}"` : '';
+    return `<span class="badge ${isWarn ? 'warn' : ''}"${titleAttr}>${escapeHtml(n)}</span>`;
+  }).join('');
+  const calcBadges = calcNames.map(n => {
+    const boards = boardNamesForDisplay(r, n, 'calc');
+    const lines = [];
+    if (boards.length) lines.push(`使用ボード: ${boards.join(', ')}`);
+    lines.push('カスタム項目・計算式の中でこの物理カラムが参照されています');
+    return `<span class="badge calc" title="${escapeHtml(lines.join('\\n'))}">${escapeHtml(n)}</span>`;
+  }).join('');
   const unaliasedBadge = r.is_unaliased ? '<span class="badge unaliased" title="表示名が設定されず、物理カラム名がそのまま使われています">物理名そのまま</span>' : '';
   return `
     ${aliasBadges || (calcBadges ? '' : '<span class="status-ok">-</span>')}
@@ -726,50 +849,129 @@ function renderDisplayNameCell(r) {
   `;
 }
 
+// 物理カラム(table_name+column_name)ごとに、どのボードがどの表示名/計算式名で
+// 使っているかをboard_detailsから組み立てる(DD-016。使用ボード欄でエイリアス対応を
+// 一目で分かるようにするため。/api/board_details はドリルダウンで既に取得済みのデータを再利用する)
+let boardAliasesByColumn = {};
+
+function buildBoardAliasMap(boardDetails) {
+  boardAliasesByColumn = {};
+  (boardDetails || []).forEach(d => {
+    const key = normalizeKey(d.table_name, d.column_name);
+    (boardAliasesByColumn[key] = boardAliasesByColumn[key] || []).push(d);
+  });
+}
+
+// ボード名を1行目(｜区切り)に、同ボードの表示名(2件目以降)・計算式使用分をその下に重ねて表示する(DD-020)
+function renderBoardGroup(name, entry) {
+  const lines = [...Array.from(entry.alias), ...Array.from(entry.calc).map(c => `計算式: ${c}`)];
+  const aliasHtml = lines.map(l => `<div class="alias-line${l.startsWith('計算式: ') ? ' calc' : ''}">${escapeHtml(l)}</div>`).join('');
+  return `<div class="board-group"><div class="board-row">` +
+    `<span class="board-name">${escapeHtml(name)}</span><span class="sep">｜</span>` +
+    `<div class="alias-list">${aliasHtml}</div></div></div>`;
+}
+
+function formatBoardText(name, entry) {
+  const parts = [];
+  if (entry.alias.size) parts.push(Array.from(entry.alias).join('/'));
+  if (entry.calc.size) parts.push('計算式: ' + Array.from(entry.calc).join('/'));
+  return parts.length ? `${name}(${parts.join('・')})` : name;
+}
+
 function renderBoardsCell(r) {
-  const boardList = r.boards.slice(0, 3).join(', ') + (r.boards.length > 3 ? ` 他${r.boards.length - 3}件` : '');
-  return escapeHtml(boardList) || '-';
+  const details = boardAliasesByColumn[normalizeKey(r.table_name, r.column_name)] || [];
+  if (details.length === 0) {
+    if (!r.boards.length) return '-';
+    return r.boards.map(b => renderBoardGroup(b, { alias: new Set(), calc: new Set() })).join('');
+  }
+  const byBoard = new Map();
+  details.forEach(d => {
+    if (!byBoard.has(d.board_name)) byBoard.set(d.board_name, { alias: new Set(), calc: new Set() });
+    const entry = byBoard.get(d.board_name);
+    (d.usage_type === 'calc' ? entry.calc : entry.alias).add(d.display_name);
+  });
+  const boardNames = Array.from(byBoard.keys());
+  // 件数が多い場合は先頭3件のみ表示し、残りは件数のみ示す(フルの一覧はtitleホバーで見られる、DD-018踏襲)
+  const groups = boardNames.slice(0, 3).map(name => renderBoardGroup(name, byBoard.get(name))).join('');
+  const restCount = boardNames.length - 3;
+  const restItem = restCount > 0 ? `<div class="board-list-more">他${restCount}件</div>` : '';
+  const fullTitle = boardNames.map(name => formatBoardText(name, byBoard.get(name))).join('\\n');
+  return `<div title="${escapeHtml(fullTitle)}">${groups}${restItem}</div>`;
 }
 
 const MAIN_COLUMN_DEFS = {
   table_name: { label: 'テーブル/ビュー', width: '16%', cell: r => escapeHtml(r.table_name) },
-  column_name: { label: '物理カラム名', width: '16%', cell: r => `<code>${escapeHtml(r.column_name)}</code>` },
-  display_name: { label: '表示名(エイリアス)', width: '34%', cell: renderDisplayNameCell },
-  usage_count: { label: '使用件数', width: '10%', cell: r => `${r.usage_count}件` },
-  boards: { label: '使用ボード', width: '24%', className: 'boards', cell: renderBoardsCell },
+  column_name: {
+    label: '物理カラム名', width: '16%',
+    cell: r => `<code class="col-link" data-table="${escapeHtml(r.table_name)}" data-column="${escapeHtml(r.column_name)}" title="クリックするとテーブル定義を表示します">${escapeHtml(r.column_name)}</code>`,
+  },
+  display_name: { label: '表示名(エイリアス)', width: '30%', cell: renderDisplayNameCell },
+  usage_count: { label: '使用件数', width: '8%', cell: r => `${r.usage_count}件` },
+  boards: { label: '使用ボード(実際のエイリアス名)', width: '30%', className: 'boards', cell: renderBoardsCell },
 };
 
 function renderTableHeader() {
   const headRow = document.getElementById('main-thead-row');
-  headRow.innerHTML = columnOrder.map((key, idx) => {
+  headRow.innerHTML = columnOrder.map((key) => {
     const def = MAIN_COLUMN_DEFS[key];
     const arrow = (sortColumn === key) ? (sortDirection === 'asc' ? '▲' : '▼') : '';
-    const leftBtn = idx > 0
-      ? `<button type="button" class="col-move-btn" data-move="left" data-col="${key}" title="左の列と入れ替え">←</button>` : '';
-    const rightBtn = idx < columnOrder.length - 1
-      ? `<button type="button" class="col-move-btn" data-move="right" data-col="${key}" title="右の列と入れ替え">→</button>` : '';
-    return `<th style="width:${def.width}" data-sort-col="${key}">` +
-      `<span class="col-move-buttons">${leftBtn}${rightBtn}</span>` +
+    return `<th style="width:${def.width}" data-sort-col="${key}" draggable="true">` +
+      `<span class="drag-handle" title="ドラッグで列の並び替え">⠿</span>` +
       `<span class="th-label">${def.label}</span><span class="sort-arrow">${arrow}</span></th>`;
   }).join('');
 }
 
-function moveColumn(key, direction) {
-  const idx = columnOrder.indexOf(key);
-  const swapWith = direction === 'left' ? idx - 1 : idx + 1;
-  if (idx === -1 || swapWith < 0 || swapWith >= columnOrder.length) return;
-  [columnOrder[idx], columnOrder[swapWith]] = [columnOrder[swapWith], columnOrder[idx]];
+// 論点2(DD-020): 列見出しのドラッグ並び替え(←/→ボタンは廃止)
+let dragColumnKey = null;
+
+function reorderColumn(fromKey, toKey) {
+  if (!fromKey || fromKey === toKey) return;
+  const from = columnOrder.indexOf(fromKey);
+  const to = columnOrder.indexOf(toKey);
+  if (from === -1 || to === -1) return;
+  columnOrder.splice(from, 1);
+  columnOrder.splice(to, 0, fromKey);
   renderTableHeader();
   applyFilters();
 }
 
-document.querySelector('#main-thead-row').closest('thead').addEventListener('click', (e) => {
-  const moveBtn = e.target.closest('.col-move-btn');
-  if (moveBtn) {
-    e.stopPropagation();
-    moveColumn(moveBtn.dataset.col, moveBtn.dataset.move);
-    return;
-  }
+const mainThead = document.querySelector('#main-thead-row').closest('thead');
+
+mainThead.addEventListener('dragstart', (e) => {
+  const th = e.target.closest('th[data-sort-col]');
+  if (!th) return;
+  dragColumnKey = th.dataset.sortCol;
+  th.classList.add('col-dragging');
+  e.dataTransfer.effectAllowed = 'move';
+});
+
+mainThead.addEventListener('dragover', (e) => {
+  const th = e.target.closest('th[data-sort-col]');
+  if (!th || th.dataset.sortCol === dragColumnKey) return;
+  e.preventDefault();
+  th.classList.add('col-drop-target');
+});
+
+mainThead.addEventListener('dragleave', (e) => {
+  const th = e.target.closest('th[data-sort-col]');
+  if (th) th.classList.remove('col-drop-target');
+});
+
+mainThead.addEventListener('dragend', () => {
+  mainThead.querySelectorAll('th').forEach(th => th.classList.remove('col-dragging', 'col-drop-target'));
+  dragColumnKey = null;
+});
+
+mainThead.addEventListener('drop', (e) => {
+  const th = e.target.closest('th[data-sort-col]');
+  if (!th) return;
+  e.preventDefault();
+  th.classList.remove('col-drop-target');
+  reorderColumn(dragColumnKey, th.dataset.sortCol);
+  dragColumnKey = null;
+});
+
+mainThead.addEventListener('click', (e) => {
   const th = e.target.closest('th[data-sort-col]');
   if (!th) return;
   const col = th.dataset.sortCol;
@@ -784,6 +986,58 @@ document.querySelector('#main-thead-row').closest('thead').addEventListener('cli
   }
   renderTableHeader();
   applyFilters();
+});
+
+// 論点1(DD-020): 物理カラム名クリック→テーブル定義サイドパネル(横の空きスペース、無ければ一覧下にインライン表示)
+function openTableDefPanel(table, column) {
+  const defs = allRows
+    .filter(r => r.table_name === table)
+    .map(r => ({ column_name: r.column_name, data_type: r.data_type }))
+    .sort((a, b) => a.column_name.localeCompare(b.column_name));
+  document.getElementById('table-def-title').textContent = `テーブル定義: ${table}`;
+  document.getElementById('table-def-sub').textContent = `${defs.length}カラム中、クリックしたカラムを強調表示`;
+  document.getElementById('table-def-tbody').innerHTML = defs.map(c => {
+    const hl = c.column_name === column ? ' class="highlight"' : '';
+    return `<tr${hl}><td><code>${escapeHtml(c.column_name)}</code></td><td>${escapeHtml(c.data_type || '-')}</td></tr>`;
+  }).join('');
+  document.querySelectorAll('.col-link').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll(`.col-link[data-table="${CSS.escape(table)}"][data-column="${CSS.escape(column)}"]`)
+    .forEach(el => el.classList.add('active'));
+  document.getElementById('table-def-panel').classList.add('open');
+  positionTableDefPanel();
+}
+
+function closeTableDefPanel() {
+  document.getElementById('table-def-panel').classList.remove('open');
+  document.querySelectorAll('.col-link').forEach(el => el.classList.remove('active'));
+}
+
+// 画面右に十分な空きスペースがあればそこに固定表示し、無ければ一覧の下にインライン表示する
+function positionTableDefPanel() {
+  const panel = document.getElementById('table-def-panel');
+  if (!panel.classList.contains('open')) return;
+  const wrap = document.querySelector('.wrap');
+  const wrapRect = wrap.getBoundingClientRect();
+  const spaceRight = window.innerWidth - wrapRect.right;
+  const PANEL_WIDTH_WITH_MARGIN = 340;
+  if (spaceRight >= PANEL_WIDTH_WITH_MARGIN) {
+    panel.classList.remove('inline-mode');
+    panel.style.left = (wrapRect.right + 24) + 'px';
+    if (panel.parentElement !== document.body) document.body.appendChild(panel);
+  } else {
+    panel.classList.add('inline-mode');
+    panel.style.left = '';
+    const anchor = document.getElementById('table-def-inline-anchor');
+    if (panel.parentElement !== anchor) anchor.appendChild(panel);
+  }
+}
+
+window.addEventListener('resize', positionTableDefPanel);
+document.getElementById('table-def-close').addEventListener('click', closeTableDefPanel);
+document.getElementById('tbody').addEventListener('click', (e) => {
+  const link = e.target.closest('.col-link');
+  if (!link) return;
+  openTableDefPanel(link.dataset.table, link.dataset.column);
 });
 
 function applyFilters() {
@@ -872,9 +1126,23 @@ function renderWhitelist(entries) {
       <td>${escapeHtml(e.table_name)}</td>
       <td><code>${escapeHtml(e.column_name)}</code></td>
       <td>${escapeHtml(e.reason || '')}</td>
-      <td>${(STATIC_EXPORT || UPLOADED_MODE) ? '' : `<button class="wl-remove-btn" data-table="${escapeHtml(e.table_name)}" data-column="${escapeHtml(e.column_name)}">削除</button>`}</td>
+      <td>${(STATIC_EXPORT || UPLOADED_MODE) ? '' : wlRemoveTriggerHtml(e.table_name, e.column_name)}</td>
     </tr>
   `).join('');
+}
+
+function wlRemoveTriggerHtml(tableName, columnName) {
+  return `<span class="wl-del" data-table="${escapeHtml(tableName)}" data-column="${escapeHtml(columnName)}">` +
+    `<button class="wl-remove-btn">削除</button></span>`;
+}
+
+function wlRemoveConfirmHtml(columnName) {
+  // 誤クリックでの即削除を防ぐため、確認ステップをその場に展開する(DD-014。
+  // window.confirm()等のネイティブダイアログは、wlFormHtml同様に自動操作ブラウザでの
+  // 検証を妨げる可能性があるため使わない)
+  return `<span class="wl-del-confirm-label">${escapeHtml(columnName)}を削除しますか？</span>` +
+    `<button class="wl-del-confirm-btn">削除する</button>` +
+    `<button class="wl-del-cancel-btn">キャンセル</button>`;
 }
 
 function escapeHtml(s) {
@@ -899,9 +1167,22 @@ function initBoardDrilldown(boardDetails) {
     boardNames.map(name =>
       `<option value="${escapeHtml(name)}">${escapeHtml(name)}（${boardDetailsByBoard[name].length}件）</option>`
     ).join('');
-  select.addEventListener('change', () => renderDrilldown(select.value));
-  renderDrilldown('');
+  // データ再読込後も選択中のボードを保持する(DD-014)。再読込後に存在しなくなった
+  // ボードが選択されていた場合は選択なし状態に戻す
+  if (!selectedBoardName || !boardDetailsByBoard[selectedBoardName]) {
+    selectedBoardName = '';
+  }
+  select.value = selectedBoardName;
+  renderDrilldown(selectedBoardName);
 }
+
+// changeリスナーはページ初期化時に一度だけ登録する(initBoardDrilldownは再読込のたびに
+// <select>のoption一覧を作り直すが、select要素自体は使い回すため、ここで登録すると
+// 呼び出すたびにリスナーが重複登録されてしまう)
+document.getElementById('board-select').addEventListener('change', () => {
+  selectedBoardName = document.getElementById('board-select').value;
+  renderDrilldown(selectedBoardName);
+});
 
 function renderDrilldown(boardName) {
   const hint = document.getElementById('drilldown-hint');
@@ -963,12 +1244,25 @@ document.body.addEventListener('click', async (e) => {
   }
   const delBtn = e.target.closest('.wl-remove-btn');
   if (delBtn) {
+    const wrap = delBtn.closest('.wl-del');
+    wrap.innerHTML = wlRemoveConfirmHtml(wrap.dataset.column);
+    return;
+  }
+  const delCancelBtn = e.target.closest('.wl-del-cancel-btn');
+  if (delCancelBtn) {
+    const wrap = delCancelBtn.closest('.wl-del');
+    wrap.innerHTML = `<button class="wl-remove-btn">削除</button>`;
+    return;
+  }
+  const delConfirmBtn = e.target.closest('.wl-del-confirm-btn');
+  if (delConfirmBtn) {
+    const wrap = delConfirmBtn.closest('.wl-del');
     await fetch('/api/whitelist/delete', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({table_name: delBtn.dataset.table, column_name: delBtn.dataset.column}),
+      body: JSON.stringify({table_name: wrap.dataset.table, column_name: wrap.dataset.column}),
     });
-    location.reload();
+    await load();
   }
 });
 
@@ -978,8 +1272,10 @@ document.body.addEventListener('keydown', async (e) => {
   await submitWhitelistAdd(e.target.closest('.wl-add'));
 });
 
+// 「このデータを見る」ボタンは既定表示そのものを指すだけで操作として不要なため廃止し(DD-016)、
+// 残り2ボタンは開閉トグルとして独立動作させる。activeBtnIdにnullを渡すと両パネルとも閉じる
 function setActiveMode(activeBtnId) {
-  ['mode-demo-btn', 'mode-upload-btn', 'mode-connect-btn'].forEach(id => {
+  ['mode-upload-btn', 'mode-connect-btn'].forEach(id => {
     document.getElementById(id).classList.toggle('active', id === activeBtnId);
   });
   document.getElementById('upload-panel').style.display = activeBtnId === 'mode-upload-btn' ? 'block' : 'none';
@@ -987,20 +1283,13 @@ function setActiveMode(activeBtnId) {
 }
 
 document.getElementById('mode-upload-btn').addEventListener('click', () => {
-  setActiveMode('mode-upload-btn');
+  const isActive = document.getElementById('mode-upload-btn').classList.contains('active');
+  setActiveMode(isActive ? null : 'mode-upload-btn');
 });
 
 document.getElementById('mode-connect-btn').addEventListener('click', () => {
-  setActiveMode('mode-connect-btn');
-});
-
-document.getElementById('mode-demo-btn').addEventListener('click', () => {
-  setActiveMode('mode-demo-btn');
-  document.getElementById('upload-status').textContent = '';
-  UPLOADED_MODE = false;
-  sortColumn = null;
-  renderTableHeader();
-  load();
+  const isActive = document.getElementById('mode-connect-btn').classList.contains('active');
+  setActiveMode(isActive ? null : 'mode-connect-btn');
 });
 
 document.getElementById('load-uploaded-btn').addEventListener('click', handleLoadUploaded);
@@ -1030,7 +1319,7 @@ document.getElementById('do-connect-btn').addEventListener('click', async () => 
       return;
     }
     statusEl.textContent = '取得完了。画面を更新します...';
-    setActiveMode('mode-demo-btn');
+    setActiveMode(null);
     sortColumn = null;
     renderTableHeader();
     await load();
@@ -1055,7 +1344,9 @@ function updateCommandPreview() {
   const parts = ['python main.py'];
   for (const f of UPDATE_CMD_FIELDS) {
     const val = document.getElementById(f.id).value.trim();
-    parts.push(`${f.flag} ${val ? val : '<' + f.placeholder + '>'}`);
+    // 値にスペースを含むパス(例: MotionBoardの既定フォルダ名"[My Boards]")でもそのまま
+    // ターミナルにコピペして実行できるよう、入力値は常にダブルクオートで囲む(DD-016)
+    parts.push(`${f.flag} ${val ? '"' + val + '"' : '<' + f.placeholder + '>'}`);
   }
   document.getElementById('update-cmd-output').textContent = parts.join(' ');
 }
@@ -1121,7 +1412,7 @@ def fetch_data(db_path: str, whitelist: set = None):
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
     cur.execute("""
-        SELECT c.id, c.table_name, c.column_name,
+        SELECT c.id, c.table_name, c.column_name, c.data_type,
                GROUP_CONCAT(DISTINCT CASE WHEN a.usage_type='alias' THEN a.display_name END) AS display_names,
                GROUP_CONCAT(DISTINCT CASE WHEN a.usage_type='calc' THEN a.display_name END) AS calc_names,
                COUNT(DISTINCT CASE WHEN a.usage_type='alias' THEN a.display_name END) AS alias_count,
@@ -1140,19 +1431,20 @@ def fetch_data(db_path: str, whitelist: set = None):
     for row in rows:
         table_name = row[1]
         column_name = row[2]
-        display_names = row[3].split(",") if row[3] else []
-        alias_count = row[5] or 0
-        usage_count = row[6] or 0
+        display_names = row[4].split(",") if row[4] else []
+        alias_count = row[6] or 0
+        usage_count = row[7] or 0
         is_whitelisted = _normalize_key(table_name, column_name) in whitelist
         result.append({
             "id": row[0],
             "table_name": table_name,
             "column_name": column_name,
+            "data_type": row[3],
             "display_names": display_names,
-            "calc_names": row[4].split(",") if row[4] else [],
+            "calc_names": row[5].split(",") if row[5] else [],
             "alias_count": alias_count,
             "usage_count": usage_count,
-            "boards": row[7].split(",") if row[7] else [],
+            "boards": row[8].split(",") if row[8] else [],
             "is_unaliased": any(_normalize_text(column_name) == _normalize_text(n) for n in display_names),
             "is_orphan": usage_count == 0,
             # 1対多の表記ゆれ候補としてハイライトするかどうか(alias_countが2以上でも、

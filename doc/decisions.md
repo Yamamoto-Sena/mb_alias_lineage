@@ -45,8 +45,8 @@
 - **日付**: 2026-09-30
 - **背景**: `dr_sum_metadata.py`は当初プレースホルダ実装で、実際の接続仕様が未確定だった。
 - **決定**: ドライバクラスは`jp.co.dw_sapporo.JDBC.JDBCDriver`、接続URLは`jdbc:dwods:<host>:<port>:<database>`、カラム一覧は`__all_tables__`を`assortment='column'`で絞り込んで取得する（`'table'`はテーブル自体の見出し行でカラム詳細を持たない。`doc/engineering-patterns.md` 6参照）。
-- **帰結**: ディストリビューター・マルチビューの区別、`column_type`数値コードの型名変換は対応表未確認のためスコープ外のまま（既知の制約）。
-- **元DD**: DD-002-2
+- **帰結**: ディストリビューター・マルチビューの区別は対応表未確認のためスコープ外のまま（既知の制約）。`column_type`数値コードの型名変換は、DD-024でユーザーが実機から取得した25カラムのデータにより`0`=VARCHAR・`3`=DATE・`7`=NUMERICの3種類のみ確認済み（`web_viewer.py`の`DR_SUM_TYPE_CODE_MAP`に反映）。TIME/TIMESTAMP/INTERVAL/OBJECT等その他の値は引き続き未確認で、数値のまま「内部コード」注記表示（誤変換リスクを避けるため、確認できた値のみ変換する方針）。
+- **元DD**: DD-002-2, DD-024
 
 ## D-005: 本ツールは認証なし・localhost限定・外部非公開を既定の運用設計とする
 

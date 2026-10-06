@@ -24,6 +24,7 @@ from web_viewer import (
     fetch_board_details,
     fetch_cross_column_patterns,
     fetch_data,
+    fetch_excluded_aliases,
     warn_if_large,
 )
 
@@ -40,10 +41,12 @@ def build_static_html(db_path: str, whitelist: set = None, whitelist_entries: li
     warn_if_large(len(data))
     patterns = fetch_cross_column_patterns(db_path, whitelist=whitelist, threshold=threshold)
     board_details = fetch_board_details(db_path)
+    excluded_aliases = fetch_excluded_aliases(db_path)
     data_json = _escape_script_close(data)
     patterns_json = _escape_script_close(patterns)
     board_details_json = _escape_script_close(board_details)
     whitelist_json = _escape_script_close(whitelist_entries or [])
+    excluded_aliases_json = _escape_script_close(excluded_aliases)
     generated_at = datetime.now().strftime("%Y-%m-%d %H:%M")
 
     html = INDEX_HTML
@@ -53,47 +56,36 @@ def build_static_html(db_path: str, whitelist: set = None, whitelist_entries: li
     html = html.replace("let STATIC_EXPORT = false;", "let STATIC_EXPORT = true;")
 
     # fetch('/api/columns')等でサーバーに問い合わせている部分を、埋め込み済みの
-    # JSONデータを直接使う形に置き換える
+    # JSONデータを直接使う形に置き換える。実際の描画処理はrenderAll()(web_viewer.py側で
+    # サーバーモードと共通化、DD-014)を呼ぶだけなので、この置換対象には含めない
     html = html.replace(
         """async function load() {
-  const [colRes, patRes, boardRes, whitelistRes] = await Promise.all([
+  const [colRes, patRes, boardRes, whitelistRes, excludedRes] = await Promise.all([
     fetch('/api/columns'), fetch('/api/patterns'), fetch('/api/board_details'), fetch('/api/whitelist'),
+    fetch('/api/excluded_aliases'),
   ]);
   let colData = await colRes.json();
   let patterns = await patRes.json();
   let boardDetails = await boardRes.json();
   let whitelistEntries = await whitelistRes.json();
+  let excludedAliases = await excludedRes.json();
   // lineage.dbがまだ存在しない場合(DD-007の--connect起動直後)、各APIは
   // {"error": ...}を返す。配列/オブジェクトでない値はレンダリング関数を壊すため空にする
   if (!Array.isArray(colData)) colData = [];
   if (!patterns || typeof patterns !== 'object' || Array.isArray(patterns)) patterns = {};
   if (!Array.isArray(boardDetails)) boardDetails = [];
   if (!Array.isArray(whitelistEntries)) whitelistEntries = [];
-  allRows = colData;
-  lastPatterns = patterns;
-  renderCards(allRows, patterns);
-  renderTable(allRows);
-  renderManyToOne(patterns.many_to_one || []);
-  renderSimilarPairs(patterns.similar_pairs || []);
-  renderWhitelist(whitelistEntries);
-  initBoardDrilldown(boardDetails);
+  if (!Array.isArray(excludedAliases)) excludedAliases = [];
+  renderAll(colData, patterns, boardDetails, whitelistEntries, excludedAliases);
 }""",
         f"""const EMBEDDED_DATA = {data_json};
 const EMBEDDED_PATTERNS = {patterns_json};
 const EMBEDDED_BOARD_DETAILS = {board_details_json};
 const EMBEDDED_WHITELIST = {whitelist_json};
+const EMBEDDED_EXCLUDED_ALIASES = {excluded_aliases_json};
 
 async function load() {{
-  allRows = EMBEDDED_DATA;
-  const patterns = EMBEDDED_PATTERNS;
-  const boardDetails = EMBEDDED_BOARD_DETAILS;
-  lastPatterns = patterns;
-  renderCards(allRows, patterns);
-  renderTable(allRows);
-  renderManyToOne(patterns.many_to_one || []);
-  renderSimilarPairs(patterns.similar_pairs || []);
-  renderWhitelist(EMBEDDED_WHITELIST);
-  initBoardDrilldown(boardDetails);
+  renderAll(EMBEDDED_DATA, EMBEDDED_PATTERNS, EMBEDDED_BOARD_DETAILS, EMBEDDED_WHITELIST, EMBEDDED_EXCLUDED_ALIASES);
 }}"""
     )
 

@@ -34,6 +34,93 @@ def test_build_db_unmatched_alias_falls_back_to_fumei(tmp_path, capsys):
     assert "見つからないエイリアス" in capsys.readouterr().out
 
 
+def test_build_db_excludes_alias_from_different_known_db(tmp_path, capsys):
+    db_path = tmp_path / "lineage.db"
+    aliases = [
+        {"table_name": "T_OTHER", "column_name": "COL1", "display_name": "他DB項目",
+         "board_name": "board1", "item_id": "i1", "source_db": "OtherDB"},
+    ]
+    ma.build_db(str(db_path), COLUMNS, aliases, connected_db="Test")
+
+    conn = sqlite3.connect(db_path)
+    columns_rows = conn.execute("SELECT table_name, column_name FROM columns WHERE table_name='T_OTHER'").fetchall()
+    excluded_rows = conn.execute(
+        "SELECT source_db, table_name, column_name, display_name, board_name FROM excluded_aliases"
+    ).fetchall()
+    conn.close()
+    assert columns_rows == []
+    assert excluded_rows == [("OtherDB", "T_OTHER", "COL1", "他DB項目", "board1")]
+    assert "別のDB用と分かったエイリアスが1件" in capsys.readouterr().out
+
+
+def test_build_db_does_not_exclude_when_source_db_matches_connected_db(tmp_path):
+    db_path = tmp_path / "lineage.db"
+    aliases = [
+        {"table_name": "T_A", "column_name": "COL1", "display_name": "表示A",
+         "board_name": "board1", "item_id": "i1", "source_db": "Test"},
+    ]
+    ma.build_db(str(db_path), COLUMNS, aliases, connected_db="Test")
+
+    conn = sqlite3.connect(db_path)
+    alias_rows = conn.execute("SELECT display_name FROM aliases").fetchall()
+    excluded_rows = conn.execute("SELECT * FROM excluded_aliases").fetchall()
+    conn.close()
+    assert alias_rows == [("表示A",)]
+    assert excluded_rows == []
+
+
+def test_build_db_does_not_exclude_when_source_db_unknown(tmp_path):
+    # source_db未設定(汎用ヒューリスティック・手動モード等、所属DBを特定できない経路)の
+    # エイリアスは、接続中DBと違う保証がないため除外せず、従来どおり不一致判定の対象にする
+    db_path = tmp_path / "lineage.db"
+    aliases = [
+        {"table_name": "T_UNKNOWN", "column_name": "GHOST", "display_name": "幽霊",
+         "board_name": "board1", "item_id": None},
+    ]
+    ma.build_db(str(db_path), COLUMNS, aliases, connected_db="Test")
+
+    conn = sqlite3.connect(db_path)
+    columns_rows = conn.execute("SELECT table_name, column_name FROM columns WHERE column_name='GHOST'").fetchall()
+    excluded_rows = conn.execute("SELECT * FROM excluded_aliases").fetchall()
+    conn.close()
+    assert columns_rows == [("T_UNKNOWN", "GHOST")]
+    assert excluded_rows == []
+
+
+def test_build_db_does_not_exclude_when_connected_db_not_given(tmp_path):
+    # --connected-db未指定(--stub/--demo等)では除外ロジック自体を無効化し、従来どおりの挙動にする
+    db_path = tmp_path / "lineage.db"
+    aliases = [
+        {"table_name": "T_OTHER", "column_name": "COL1", "display_name": "他DB項目",
+         "board_name": "board1", "item_id": "i1", "source_db": "OtherDB"},
+    ]
+    ma.build_db(str(db_path), COLUMNS, aliases, connected_db=None)
+
+    conn = sqlite3.connect(db_path)
+    columns_rows = conn.execute("SELECT table_name, column_name FROM columns WHERE table_name='T_OTHER'").fetchall()
+    excluded_rows = conn.execute("SELECT * FROM excluded_aliases").fetchall()
+    conn.close()
+    assert columns_rows == [("T_OTHER", "COL1")]
+    assert excluded_rows == []
+
+
+def test_build_db_exclusion_normalizes_fullwidth_and_case(tmp_path):
+    # 全角/半角・大文字小文字の違いだけで誤って除外(または除外漏れ)しないことを確認
+    db_path = tmp_path / "lineage.db"
+    aliases = [
+        {"table_name": "T_A", "column_name": "COL1", "display_name": "表示A",
+         "board_name": "board1", "item_id": "i1", "source_db": "ｔｅｓｔ"},
+    ]
+    ma.build_db(str(db_path), COLUMNS, aliases, connected_db="TEST")
+
+    conn = sqlite3.connect(db_path)
+    alias_rows = conn.execute("SELECT display_name FROM aliases").fetchall()
+    excluded_rows = conn.execute("SELECT * FROM excluded_aliases").fetchall()
+    conn.close()
+    assert alias_rows == [("表示A",)]
+    assert excluded_rows == []
+
+
 def test_report_naming_inconsistencies_detects_variants(tmp_path, capsys):
     db_path = tmp_path / "lineage.db"
     aliases = [

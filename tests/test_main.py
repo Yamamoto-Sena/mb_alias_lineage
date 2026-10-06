@@ -106,6 +106,51 @@ def test_main_forwards_whitelist_and_threshold_to_match_aliases(monkeypatch, tmp
     assert "0.9" in match_aliases_call
 
 
+def test_main_forwards_connected_db_to_match_aliases(monkeypatch, tmp_path):
+    # DD-026: 実接続時は--dbで指定したDr.Sum DB名をmatch_aliases.pyの--connected-dbに
+    # そのまま渡し、所属DBが異なると分かっているエイリアスを除外できるようにする
+    calls = []
+
+    def fake_run(cmd, expect_file=None):
+        calls.append(cmd)
+        if "dr_sum_metadata.py" in cmd:
+            (tmp_path / "dr_sum_columns.json").write_text("[]", encoding="utf-8")
+        elif "board_parser.py" in cmd:
+            (tmp_path / "board_aliases.json").write_text("[]", encoding="utf-8")
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(main_module, "run", fake_run)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sys, "argv", [
+        "main.py", "--backup-dir", "backup",
+        "--host", "h", "--db", "DATALIZER_PRACTICE", "--user", "u", "--jdbc-jar", "j.jar",
+    ])
+    main_module.main()
+    match_aliases_call = calls[2]
+    assert "--connected-db" in match_aliases_call
+    assert "DATALIZER_PRACTICE" in match_aliases_call
+
+
+def test_main_stub_does_not_forward_connected_db(monkeypatch, tmp_path):
+    # --stubには接続先DBが存在しないため、--connected-dbを渡さない
+    calls = []
+
+    def fake_run(cmd):
+        calls.append(cmd)
+        if "dr_sum_metadata.py" in cmd:
+            (tmp_path / "dr_sum_columns.json").write_text("[]", encoding="utf-8")
+        elif "board_parser.py" in cmd:
+            (tmp_path / "board_aliases.json").write_text("[]", encoding="utf-8")
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sys, "argv", ["main.py", "--stub"])
+    main_module.main()
+    match_aliases_call = calls[2]
+    assert "--connected-db" not in match_aliases_call
+
+
 def test_main_demo_runs_two_steps_against_demo_data(monkeypatch, tmp_path):
     calls = []
 

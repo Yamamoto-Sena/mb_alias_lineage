@@ -101,6 +101,8 @@ def main() -> None:
         run(board_parser_cmd, expect_file="board_aliases.json")
 
     match_cmd = [py, "match_aliases.py", "--columns", "dr_sum_columns.json", "--aliases", "board_aliases.json"]
+    if not args.stub:
+        match_cmd += ["--connected-db", args.db]
     if args.whitelist:
         match_cmd += ["--whitelist", args.whitelist]
     if args.similarity_threshold != 0.8:

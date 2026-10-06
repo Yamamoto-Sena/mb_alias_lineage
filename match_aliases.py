@@ -92,7 +92,7 @@ def remove_whitelist_entry(path: str, table_name: str, column_name: str) -> list
     return remaining
 
 
-def build_db(db_path: str, columns: list, aliases: list) -> None:
+def build_db(db_path: str, columns: list, aliases: list, connected_db: str = None) -> None:
     schema_path = Path(__file__).parent / "db_schema.sql"
     conn = sqlite3.connect(db_path)
     conn.executescript(schema_path.read_text(encoding="utf-8"))
@@ -125,7 +125,25 @@ def build_db(db_path: str, columns: list, aliases: list) -> None:
     # それでも見つからない場合は警告して table_name="(不明)" で仮登録
     unmatched = 0
     normalized_matches = 0
+    excluded = 0
+    connected_db_normalized = _normalize_text(connected_db) if connected_db else None
     for alias in aliases:
+        source_db = alias.get("source_db") or ""
+        # DD-026: ボード定義自身が「別DBのものだ」と申告している(source_dbが分かっていて
+        # 接続中DBと違う)場合は、物理カラムと照合するまでもなく無関係と確定しているため、
+        # 不一致候補としてcolumns/aliasesに混ぜず、excluded_aliasesへ分けて記録する
+        if connected_db_normalized and source_db and _normalize_text(source_db) != connected_db_normalized:
+            excluded += 1
+            cur.execute(
+                """
+                INSERT INTO excluded_aliases (source_db, table_name, column_name, display_name, board_name, usage_type)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (source_db, alias["table_name"], alias["column_name"], alias["display_name"],
+                 alias["board_name"], alias.get("usage_type", "alias")),
+            )
+            continue
+
         key = (alias["table_name"], alias["column_name"])
         column_id = column_id_map.get(key)
         if column_id is None:
@@ -167,6 +185,9 @@ def build_db(db_path: str, columns: list, aliases: list) -> None:
     if unmatched:
         print(f"※ Dr.Sum側のカラム一覧に見つからないエイリアスが{unmatched}件ありました"
               f"（テーブル名の表記ゆれや、取得漏れの可能性があります）")
+    if excluded:
+        print(f"※ 接続中のDB(「{connected_db}」)とは別のDB用と分かったエイリアスが"
+              f"{excluded}件あり、除外しました（画面下部の「他DBのボードのため除外」欄を参照）")
 
 
 def find_naming_inconsistencies(db_path: str, whitelist: set = None) -> list:
@@ -451,6 +472,12 @@ def main() -> None:
     parser.add_argument("--history-file",
                          help="前回実行との差分検知に使う実行履歴ファイル"
                               "(既定値: <db>.history.json。--dbが違えば履歴も混在しない)")
+    parser.add_argument("--connected-db",
+                         help="今回接続したDr.SumのDB名(DD-026)。board_parser.pyが"
+                              "ボード定義から読み取った所属DB名(source_db)と比較し、"
+                              "確実に別DBのボードと分かるエイリアスを除外するために使う。"
+                              "未指定時(--stub/--demo等)は除外ロジックを無効化し、"
+                              "従来どおり全エイリアスを不一致判定の対象にする")
     args = parser.parse_args()
     history_file = args.history_file or f"{args.db}.history.json"
 
@@ -461,7 +488,7 @@ def main() -> None:
     columns = load_json(args.columns)
     aliases = load_json(args.aliases)
 
-    build_db(args.db, columns, aliases)
+    build_db(args.db, columns, aliases, connected_db=args.connected_db)
     print(f"{args.db} にデータを保存しました\n")
     report_naming_inconsistencies(args.db, whitelist=whitelist)
     report_many_to_one_mapping(args.db, whitelist=whitelist)

@@ -119,6 +119,66 @@ def test_fetch_data_whitelist_suppresses_naming_variant_flag(tmp_path):
     assert result[0]["alias_count"] == 2  # alias_count自体は保持する(表示件数として使うため)
 
 
+def test_fetch_data_does_not_flag_unmatched_for_normal_table(tmp_path):
+    db_path = _make_db(tmp_path, [(1, "T_A", "COL1", [("表示A", "board1")])])
+    result = wv.fetch_data(db_path)
+    assert result[0]["is_unmatched"] is False
+
+
+def test_fetch_data_flags_unmatched_when_table_type_is_fumei(tmp_path):
+    # DD-025: match_aliases.pyが接続中DBの物理カラムと一致しないエイリアスを
+    # table_type='(不明)'で仮登録したケース(別DBのボード混入等)を検出できるか
+    db_path = tmp_path / "lineage.db"
+    conn = sqlite3.connect(db_path)
+    conn.executescript("""
+        CREATE TABLE columns (id INTEGER PRIMARY KEY, table_name TEXT, table_type TEXT, column_name TEXT, data_type TEXT);
+        CREATE TABLE aliases (id INTEGER PRIMARY KEY, column_id INTEGER, display_name TEXT, board_name TEXT, item_id TEXT, usage_type TEXT DEFAULT 'alias');
+    """)
+    conn.execute(
+        "INSERT INTO columns (id, table_name, table_type, column_name, data_type) VALUES (?,?,?,?,?)",
+        (1, "販売実績＿練習用", "(不明)", "会社名", None),
+    )
+    conn.execute(
+        "INSERT INTO aliases (column_id, display_name, board_name, item_id, usage_type) VALUES (?,?,?,?,'alias')",
+        (1, "会社名", "01_地域別売上", "item1"),
+    )
+    conn.commit()
+    conn.close()
+
+    result = wv.fetch_data(str(db_path))
+    assert result[0]["is_unmatched"] is True
+
+
+def test_fetch_excluded_aliases_returns_rows(tmp_path):
+    db_path = tmp_path / "lineage.db"
+    conn = sqlite3.connect(db_path)
+    conn.executescript("""
+        CREATE TABLE excluded_aliases (
+            id INTEGER PRIMARY KEY, source_db TEXT, table_name TEXT,
+            column_name TEXT, display_name TEXT, board_name TEXT, usage_type TEXT
+        );
+    """)
+    conn.execute(
+        "INSERT INTO excluded_aliases (source_db, table_name, column_name, display_name, board_name, usage_type) "
+        "VALUES (?,?,?,?,?,?)",
+        ("Test", "T_STORE_KPI", "EMPLOYEE_NAME", "従業員名", "KPI", "alias"),
+    )
+    conn.commit()
+    conn.close()
+
+    result = wv.fetch_excluded_aliases(str(db_path))
+    assert result == [{
+        "source_db": "Test", "table_name": "T_STORE_KPI", "column_name": "EMPLOYEE_NAME",
+        "display_name": "従業員名", "board_name": "KPI",
+    }]
+
+
+def test_fetch_excluded_aliases_returns_empty_list_when_table_missing(tmp_path):
+    # DD-026より前に生成されたlineage.db(excluded_aliasesテーブルが無い)でも落ちない
+    db_path = _make_db(tmp_path, [(1, "T_A", "COL1", [("表示A", "board1")])])
+    assert wv.fetch_excluded_aliases(db_path) == []
+
+
 def test_fetch_cross_column_patterns_detects_many_to_one(tmp_path):
     db_path = _make_db(tmp_path, [
         (1, "T_A", "COL1", [("金額", "board1")]),

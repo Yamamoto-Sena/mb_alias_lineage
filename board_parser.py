@@ -69,6 +69,10 @@ class AliasRecord:
     # "alias"(表示名/エイリアスとして使用) or "calc"(カスタム項目・事後計算項目の
     # 計算式の中で物理カラムが参照されている)
     usage_type: str = "alias"
+    # このエイリアスが実際に参照しているDr.SumのDB名(DD-026)。`<DataSource type="drsum">`の
+    # `src`属性(`{DB名}/{テーブル名}`形式)から取得できた場合のみ設定し、取得元経路が
+    # DB名を持たない場合(汎用ヒューリスティック・手動モード・スタブ)は空文字のままにする
+    source_db: str = ""
 
 
 # ============================================================
@@ -236,6 +240,10 @@ def _parse_drsum_datasource(root: ET.Element, source_file: str) -> List[AliasRec
     if not table_name:
         return []
     board_name = root.attrib.get("name", "").strip() or table_name
+    # `src`属性は実機確認(DD-026)で`{DB名}/{テーブル名}`形式と判明。テーブル名側は
+    # srcNameと重複するため使わず、DB名部分だけを所属DB判定用に取り出す
+    src = root.attrib.get("src", "").strip()
+    source_db = src.split("/", 1)[0].strip() if "/" in src else ""
 
     layout = root.find("Layout")
     if layout is None:
@@ -264,6 +272,7 @@ def _parse_drsum_datasource(root: ET.Element, source_file: str) -> List[AliasRec
                 board_name=board_name,
                 item_id=item.attrib.get("id", ""),
                 source_file=source_file,
+                source_db=source_db,
             ))
 
     exfield_container = layout.find("ExField")
@@ -283,6 +292,7 @@ def _parse_drsum_datasource(root: ET.Element, source_file: str) -> List[AliasRec
                         item_id=item.attrib.get("id", ""),
                         source_file=source_file,
                         usage_type="calc",
+                        source_db=source_db,
                     ))
                 # 参照元fidが解決できない計算項目(元カラムが同一データソース内に無い等)は
                 # 記録しない(既知の制約。孤立項目判定への影響はない=計算項目自体は

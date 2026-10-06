@@ -376,6 +376,21 @@ INDEX_HTML = """<!DOCTYPE html>
     </thead>
     <tbody id="drilldown-tbody"></tbody>
   </table>
+
+  <h2 id="excluded-aliases-heading" title="ボード定義自身が別DB向けと申告している(接続中のDBと所属DBが異なることが確定している)ため、不一致候補一覧には含めず除外したエイリアスです">他DBのボードのため除外</h2>
+  <div id="excluded-aliases-empty" class="empty" style="display:none">除外したエイリアスはありません</div>
+  <table id="excluded-aliases-table" style="display:none">
+    <thead>
+      <tr>
+        <th style="width:16%">所属DB</th>
+        <th style="width:20%">テーブル/ビュー</th>
+        <th style="width:20%">物理カラム名</th>
+        <th style="width:20%">表示名</th>
+        <th style="width:24%">ボード</th>
+      </tr>
+    </thead>
+    <tbody id="excluded-aliases-tbody"></tbody>
+  </table>
 </div>
 
 <div class="side-panel" id="table-def-panel">
@@ -485,7 +500,8 @@ function jsFetchData(db, whitelistSet) {
            GROUP_CONCAT(DISTINCT CASE WHEN a.usage_type='calc' THEN a.display_name END) AS calc_names,
            COUNT(DISTINCT CASE WHEN a.usage_type='alias' THEN a.display_name END) AS alias_count,
            COUNT(a.id) AS usage_count,
-           GROUP_CONCAT(DISTINCT a.board_name) AS boards
+           GROUP_CONCAT(DISTINCT a.board_name) AS boards,
+           c.table_type
     FROM columns c
     LEFT JOIN aliases a ON a.column_id = c.id
     GROUP BY c.id
@@ -493,7 +509,7 @@ function jsFetchData(db, whitelistSet) {
   `);
   if (!res.length) return [];
   return res[0].values.map(row => {
-    const [id, table_name, column_name, data_type, displayNamesRaw, calcNamesRaw, aliasCount, usageCount, boardsRaw] = row;
+    const [id, table_name, column_name, data_type, displayNamesRaw, calcNamesRaw, aliasCount, usageCount, boardsRaw, tableType] = row;
     const display_names = displayNamesRaw ? displayNamesRaw.split(",") : [];
     const isWhitelisted = whitelistSet.has(normalizeKey(table_name, column_name));
     return {
@@ -505,6 +521,9 @@ function jsFetchData(db, whitelistSet) {
       is_unaliased: display_names.some(n => normalizeText(column_name) === normalizeText(n)),
       is_orphan: (usageCount || 0) === 0,
       is_naming_variant: (aliasCount || 0) > 1 && !isWhitelisted,
+      // DD-025: match_aliases.pyが接続中DBの物理カラムと一致しないエイリアスを
+      // table_type='(不明)'で仮登録したもの(別DBのボード混入やカラム名変更等の兆候)
+      is_unmatched: tableType === "(不明)",
     };
   });
 }
@@ -581,6 +600,25 @@ function jsFetchBoardDetails(db) {
   }));
 }
 
+// DD-026: excluded_aliasesテーブルはDD-026より前に生成されたlineage.dbには存在しないため、
+// 無い場合は空扱いにする(fetch_excluded_aliases側のsqlite3.OperationalError握りつぶしと同じ意図)
+function jsFetchExcludedAliases(db) {
+  let res;
+  try {
+    res = db.exec(`
+      SELECT source_db, table_name, column_name, display_name, board_name
+      FROM excluded_aliases
+      ORDER BY source_db, table_name, column_name
+    `);
+  } catch (e) {
+    return [];
+  }
+  if (!res.length) return [];
+  return res[0].values.map(([source_db, table_name, column_name, display_name, board_name]) => ({
+    source_db, table_name, column_name, display_name, board_name,
+  }));
+}
+
 let sqlJsPromise = null;
 function loadSqlJs() {
   if (!sqlJsPromise) {
@@ -625,6 +663,7 @@ async function handleLoadUploaded() {
     allRows = jsFetchData(db, whitelistSet);
     const patterns = jsFetchCrossColumnPatterns(db, whitelistSet, 0.8);
     const boardDetails = jsFetchBoardDetails(db);
+    const excludedAliases = jsFetchExcludedAliases(db);
     lastPatterns = patterns;
     buildBoardAliasMap(boardDetails);
     sortColumn = null;
@@ -636,6 +675,7 @@ async function handleLoadUploaded() {
     renderSimilarPairs(patterns.similar_pairs || []);
     renderWhitelist(whitelistEntries);
     initBoardDrilldown(boardDetails);
+    renderExcludedAliases(excludedAliases);
     db.close();
     statusEl.textContent = `読み込み完了(${allRows.length}カラム)`;
   } catch (err) {
@@ -662,7 +702,7 @@ const CARD_DEFS = [
 
 // サーバーモード・静的配布モード(export_static.py)で共通の描画処理。検索語・カード絞り込み・
 // 列ソート・列並び替え・ドリルダウン選択中のボードは呼び出し元でリセットしない限り保持される(DD-014)
-function renderAll(rows, patterns, boardDetails, whitelistEntries) {
+function renderAll(rows, patterns, boardDetails, whitelistEntries, excludedAliases) {
   allRows = rows;
   lastPatterns = patterns;
   buildBoardAliasMap(boardDetails);
@@ -673,23 +713,27 @@ function renderAll(rows, patterns, boardDetails, whitelistEntries) {
   renderSimilarPairs(patterns.similar_pairs || []);
   renderWhitelist(whitelistEntries);
   initBoardDrilldown(boardDetails);
+  renderExcludedAliases(excludedAliases || []);
 }
 
 async function load() {
-  const [colRes, patRes, boardRes, whitelistRes] = await Promise.all([
+  const [colRes, patRes, boardRes, whitelistRes, excludedRes] = await Promise.all([
     fetch('/api/columns'), fetch('/api/patterns'), fetch('/api/board_details'), fetch('/api/whitelist'),
+    fetch('/api/excluded_aliases'),
   ]);
   let colData = await colRes.json();
   let patterns = await patRes.json();
   let boardDetails = await boardRes.json();
   let whitelistEntries = await whitelistRes.json();
+  let excludedAliases = await excludedRes.json();
   // lineage.dbがまだ存在しない場合(DD-007の--connect起動直後)、各APIは
   // {"error": ...}を返す。配列/オブジェクトでない値はレンダリング関数を壊すため空にする
   if (!Array.isArray(colData)) colData = [];
   if (!patterns || typeof patterns !== 'object' || Array.isArray(patterns)) patterns = {};
   if (!Array.isArray(boardDetails)) boardDetails = [];
   if (!Array.isArray(whitelistEntries)) whitelistEntries = [];
-  renderAll(colData, patterns, boardDetails, whitelistEntries);
+  if (!Array.isArray(excludedAliases)) excludedAliases = [];
+  renderAll(colData, patterns, boardDetails, whitelistEntries, excludedAliases);
 }
 
 function whitelistAddButton(tableName, columnName) {
@@ -929,7 +973,12 @@ function renderBoardsCell(r) {
 }
 
 const MAIN_COLUMN_DEFS = {
-  table_name: { label: 'テーブル/ビュー', width: '16%', cell: r => escapeHtml(r.table_name) },
+  table_name: {
+    label: 'テーブル/ビュー', width: '16%',
+    cell: r => escapeHtml(r.table_name) + (r.is_unmatched
+      ? ` <span class="badge warn" title="接続中のDBの物理カラムと一致しませんでした。関係ない別DBのボード定義が紛れ込んでいるか、Dr.Sum側でカラム名が変更/削除された可能性があります">DB不一致の可能性</span>`
+      : ''),
+  },
   column_name: {
     label: '物理カラム名', width: '16%',
     cell: r => `<code class="col-link" data-table="${escapeHtml(r.table_name)}" data-column="${escapeHtml(r.column_name)}" title="クリックするとテーブル定義を表示します">${escapeHtml(r.column_name)}</code>`,
@@ -1183,6 +1232,32 @@ function renderWhitelist(entries) {
       <td><code>${escapeHtml(e.column_name)}</code></td>
       <td>${escapeHtml(e.reason || '')}</td>
       <td>${(STATIC_EXPORT || UPLOADED_MODE) ? '' : wlRemoveTriggerHtml(e.table_name, e.column_name)}</td>
+    </tr>
+  `).join('');
+}
+
+// DD-026: ボード定義自身が別DB向けと申告しているため除外したエイリアスを画面下部に表示する
+function renderExcludedAliases(items) {
+  const heading = document.getElementById('excluded-aliases-heading');
+  const table = document.getElementById('excluded-aliases-table');
+  const tbody = document.getElementById('excluded-aliases-tbody');
+  const empty = document.getElementById('excluded-aliases-empty');
+  heading.textContent = `他DBのボードのため除外（${(items || []).length}件）`;
+  if (!items || items.length === 0) {
+    tbody.innerHTML = '';
+    table.style.display = 'none';
+    empty.style.display = 'block';
+    return;
+  }
+  table.style.display = '';
+  empty.style.display = 'none';
+  tbody.innerHTML = items.map(e => `
+    <tr>
+      <td>${escapeHtml(e.source_db)}</td>
+      <td>${escapeHtml(e.table_name)}</td>
+      <td><code>${escapeHtml(e.column_name)}</code></td>
+      <td>${escapeHtml(e.display_name)}</td>
+      <td>${escapeHtml(e.board_name)}</td>
     </tr>
   `).join('');
 }
@@ -1473,7 +1548,8 @@ def fetch_data(db_path: str, whitelist: set = None):
                GROUP_CONCAT(DISTINCT CASE WHEN a.usage_type='calc' THEN a.display_name END) AS calc_names,
                COUNT(DISTINCT CASE WHEN a.usage_type='alias' THEN a.display_name END) AS alias_count,
                COUNT(a.id) AS usage_count,
-               GROUP_CONCAT(DISTINCT a.board_name) AS boards
+               GROUP_CONCAT(DISTINCT a.board_name) AS boards,
+               c.table_type
         FROM columns c
         LEFT JOIN aliases a ON a.column_id = c.id
         GROUP BY c.id
@@ -1506,6 +1582,9 @@ def fetch_data(db_path: str, whitelist: set = None):
             # 1対多の表記ゆれ候補としてハイライトするかどうか(alias_countが2以上でも、
             # ホワイトリスト対象なら候補としては扱わない)
             "is_naming_variant": alias_count > 1 and not is_whitelisted,
+            # DD-025: match_aliases.pyが接続中DBの物理カラムと一致しないエイリアスを
+            # table_type='(不明)'で仮登録したもの(別DBのボード混入やカラム名変更等の兆候)
+            "is_unmatched": row[9] == "(不明)",
         })
     return result
 
@@ -1545,6 +1624,34 @@ def fetch_board_details(db_path: str) -> list:
     ]
 
 
+def fetch_excluded_aliases(db_path: str) -> list:
+    """DD-026: ボード定義自身が別DB向けと申告しているため除外したエイリアスの一覧を返す
+    (画面下部の「他DBのボードのため除外」セクション用)。"""
+    conn = sqlite3.connect(db_path)
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT source_db, table_name, column_name, display_name, board_name
+            FROM excluded_aliases
+            ORDER BY source_db, table_name, column_name
+        """)
+        rows = cur.fetchall()
+    except sqlite3.OperationalError:
+        # excluded_aliasesテーブルが無い(DD-026より前に生成されたlineage.db)場合は空扱い
+        rows = []
+    conn.close()
+    return [
+        {
+            "source_db": row[0],
+            "table_name": row[1],
+            "column_name": row[2],
+            "display_name": row[3],
+            "board_name": row[4],
+        }
+        for row in rows
+    ]
+
+
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
@@ -1575,6 +1682,14 @@ class Handler(BaseHTTPRequestHandler):
                 return
             try:
                 data = fetch_board_details(self.server.db_path)
+                self._send_json(data)
+            except Exception as e:
+                self._send_json({"error": str(e)}, status=500)
+        elif parsed.path == "/api/excluded_aliases":
+            if not self._require_db():
+                return
+            try:
+                data = fetch_excluded_aliases(self.server.db_path)
                 self._send_json(data)
             except Exception as e:
                 self._send_json({"error": str(e)}, status=500)

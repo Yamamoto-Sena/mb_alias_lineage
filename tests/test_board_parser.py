@@ -366,6 +366,19 @@ class TestDrSumDataSourceFormat:
         records = self._parse()
         assert all(r.table_name == "T_SAMPLE" for r in records)
 
+    def test_source_db_extracted_from_src_attribute(self):
+        # DD-026: src="Test/T_SAMPLE"の"/"より前がDB名
+        records = self._parse()
+        assert all(r.source_db == "Test" for r in records)
+
+    def test_source_db_empty_when_src_has_no_slash(self):
+        content = ('<?xml version="1.0" ?><DataSource name="x" type="drsum" '
+                   'src="NoSlashHere" srcName="T_SAMPLE" version="4.0.1">'
+                   '<Layout><Field><Item id="1" fid="1" title="COL1" aliasTitle=""/></Field></Layout>'
+                   '</DataSource>')
+        records = bp.auto_parse_xml("ds.xml", content.encode("utf-8"), load_index())
+        assert all(r.source_db == "" for r in records)
+
     def test_empty_alias_title_uses_physical_name_as_display_name(self):
         r = find(self._parse(), "テストデータソース", "1", "PRODUCT_CODE")
         assert r.display_name == "product_code"

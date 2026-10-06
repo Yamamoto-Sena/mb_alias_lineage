@@ -7,6 +7,7 @@
 
 DROP TABLE IF EXISTS aliases;
 DROP TABLE IF EXISTS columns;
+DROP TABLE IF EXISTS excluded_aliases;
 
 CREATE TABLE columns (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -33,3 +34,17 @@ CREATE TABLE aliases (
 
 CREATE INDEX idx_aliases_column_id ON aliases(column_id);
 CREATE INDEX idx_aliases_display_name ON aliases(display_name);
+
+-- DD-026: ボード定義の`src`属性から所属DB名が分かり、かつ接続中のDBと異なることが
+-- 確定しているエイリアス。`columns`/`aliases`には登録せず(無関係なDBのボードを
+-- 「不一致」として紛れ込ませないため)、代わりにここへ記録して画面下部にサマリ表示する。
+-- `columns`への参照を持たない(物理カラムと照合すらしていない)ため、column_idは使わない
+CREATE TABLE excluded_aliases (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_db TEXT NOT NULL,
+    table_name TEXT NOT NULL,
+    column_name TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    board_name TEXT NOT NULL,
+    usage_type TEXT NOT NULL DEFAULT 'alias'
+);

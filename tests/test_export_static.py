@@ -85,3 +85,11 @@ def test_build_static_html_embeds_whitelist_entries(tmp_path):
     )
     assert "EMBEDDED_WHITELIST" in html
     assert "テスト用" in html
+
+
+def test_build_static_html_embeds_excluded_aliases(tmp_path):
+    # DD-026: lineage.dbにexcluded_aliasesテーブルが無くても(例外握りつぶしで空配列になり)
+    # ビルド自体は落ちないことを確認する
+    html = es.build_static_html(_make_db(tmp_path))
+    assert "EMBEDDED_EXCLUDED_ALIASES" in html
+    assert "fetch('/api/excluded_aliases')" not in html

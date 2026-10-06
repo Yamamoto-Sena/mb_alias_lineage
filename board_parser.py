@@ -52,6 +52,10 @@ JAPANESE_RE = re.compile(r"[぀-ヿ㐀-鿿]")  # ひらがな・カタカナ・�
 LABEL_KEY_HINTS = ("label", "disp", "name", "alias", "title", "caption", "表示", "名称")
 ID_KEY_HINTS = ("id", "no", "seq", "key", "index", "番号", "コード")
 NAME_KEY_HINTS = ("name", "title", "caption", "名称", "ボード")
+# 実機確認(DD-023)で判明した「検索条件(事前設定フィルタ)」のタグ名。この配下の
+# dispTitle等はフィルタ条件自体のキャプションであり、カラムのエイリアス(表示名)
+# ではないため、walk()でのエイリアス抽出対象から除外する。
+SEARCH_CONDITION_TAGS = ("Condition", "SearchCondition", "PreCondition", "Expression")
 
 
 @dataclass
@@ -103,6 +107,12 @@ def _looks_like_id_key(key: str) -> bool:
 def _local_tag(tag: str) -> str:
     """XML名前空間のClark記法(`{uri}tag`)からローカル名だけを取り出す。"""
     return tag.rsplit("}", 1)[-1] if "}" in tag else tag
+
+
+def _in_search_condition(stack: List[ET.Element]) -> bool:
+    """stack(現在位置を含む祖先要素列)が検索条件(SEARCH_CONDITION_TAGS)の
+    配下にあるかを判定する(DD-023)。"""
+    return any(_local_tag(el.tag) in SEARCH_CONDITION_TAGS for el in stack)
 
 
 _XML_ENCODING_DECL_RE = re.compile(rb'<\?xml[^>]*encoding=["\']([^"\']+)["\']', re.IGNORECASE)
@@ -297,13 +307,25 @@ def _exfield_target_fids(item: ET.Element) -> List[str]:
 # ============================================================
 # 自動検出モード: XML
 # ============================================================
+def _apply_board_name_override(records: List[AliasRecord], board_name_override: Optional[str]) -> List[AliasRecord]:
+    """board_name_overrideが指定されていれば、検出済みレコードのboard_nameを問答無用で
+    上書きする。呼び出し元(.fs-fileフォルダ名から本当のボード名を確実に知っている
+    auto_parse_all)が優先され、データソース定義のname属性等ファイル内部のヒューリスティックな
+    推測より信頼できるため(DD-017)。"""
+    if board_name_override:
+        for r in records:
+            r.board_name = board_name_override
+    return records
+
+
 def auto_parse_xml(source_name: str, content: bytes, index: ColumnIndex,
-                    source_file: Optional[str] = None) -> List[AliasRecord]:
+                    source_file: Optional[str] = None,
+                    board_name_override: Optional[str] = None) -> List[AliasRecord]:
     """source_nameは表示・フォールバック用のファイル名(ZIP内のエントリ名でもよい)。
     contentは生バイト列で渡す(ET.fromstringがXML宣言のencoding指定を見て
     自前でデコードするため、Shift-JIS等で書かれたファイルもそのまま渡せる)。
     source_fileは差分取り込み(--watch)でレコードの出所を追跡するための識別子
-    (省略時はsource_nameを使う)。"""
+    (省略時はsource_nameを使う)。board_name_overrideは`_apply_board_name_override`参照。"""
     try:
         root = _parse_xml_bytes(content)
     except (ET.ParseError, ValueError, LookupError, UnicodeDecodeError):
@@ -315,7 +337,7 @@ def auto_parse_xml(source_name: str, content: bytes, index: ColumnIndex,
         # 実機確認(DD-002-3)により、MotionBoardの実データソース定義は下の汎用ロジック
         # (属性値の完全一致 + 同一要素内のラベル探索)が想定する構造と異なると判明した
         # ため、専用の抽出関数に委譲する(index引数はこの形式では使用しない)。
-        return _parse_drsum_datasource(root, source_file)
+        return _apply_board_name_override(_parse_drsum_datasource(root, source_file), board_name_override)
 
     records: List[AliasRecord] = []
 
@@ -371,8 +393,12 @@ def auto_parse_xml(source_name: str, content: bytes, index: ColumnIndex,
         if own_text:
             match_sources.append((None, own_text))
 
+        # 検索条件(事前設定フィルタ)配下は、dispTitle等がフィルタ条件自体のキャプション
+        # であってカラムのエイリアスではないため、抽出対象から除外する(DD-023)
+        in_search_condition = _in_search_condition(stack)
+
         for attr_key, attr_val in match_sources:
-            extracted = _extract_match(index, attr_val)
+            extracted = _extract_match(index, attr_val) if not in_search_condition else None
             if extracted:
                 col_upper, qualifier = extracted
                 label = find_label_on_element(el, attr_key, attr_val)
@@ -386,7 +412,7 @@ def auto_parse_xml(source_name: str, content: bytes, index: ColumnIndex,
                         item_id=find_ancestor_id(stack),
                         source_file=source_file,
                     ))
-            elif _looks_like_formula_key(attr_key) or _looks_like_formula_value(attr_val):
+            elif not in_search_condition and (_looks_like_formula_key(attr_key) or _looks_like_formula_value(attr_val)):
                 # 完全一致はしないが、計算式らしい値の中に物理カラム名が
                 # 部分文字列として埋め込まれていないか調べる(カスタム項目・事後計算項目対策)
                 cols_in_formula = _find_columns_in_formula(index, attr_val)
@@ -408,17 +434,18 @@ def auto_parse_xml(source_name: str, content: bytes, index: ColumnIndex,
         stack.pop()
 
     walk(root, [])
-    return records
+    return _apply_board_name_override(records, board_name_override)
 
 
 # ============================================================
 # 自動検出モード: JSON
 # ============================================================
 def auto_parse_json(source_name: str, content: bytes, index: ColumnIndex,
-                     source_file: Optional[str] = None) -> List[AliasRecord]:
+                     source_file: Optional[str] = None,
+                     board_name_override: Optional[str] = None) -> List[AliasRecord]:
     """source_nameは表示・フォールバック用のファイル名(ZIP内のエントリ名でもよい)。
     source_fileは差分取り込み(--watch)でレコードの出所を追跡するための識別子
-    (省略時はsource_nameを使う)。"""
+    (省略時はsource_nameを使う)。board_name_overrideは`_apply_board_name_override`参照。"""
     try:
         data = json.loads(content.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError):
@@ -554,7 +581,7 @@ def auto_parse_json(source_name: str, content: bytes, index: ColumnIndex,
                 walk(item, dict_stack)
 
     walk(data, [])
-    return records
+    return _apply_board_name_override(records, board_name_override)
 
 
 def _decode_zip_entry_name(raw_name: str) -> str:
@@ -578,11 +605,14 @@ _ZIP_NEST_DEPTH_LIMIT = 4  # 実機確認では2階層(fs-xcabinets)の入れ子
 
 
 def _parse_zip_bytes(data: bytes, index: ColumnIndex, label_prefix: str,
-                      source_file_prefix: str, depth: int = 0) -> List[AliasRecord]:
+                      source_file_prefix: str, depth: int = 0,
+                      board_name_override: Optional[str] = None) -> List[AliasRecord]:
     """ZIPバイト列を展開せずメモリ上で解析する。エントリ自体がZIPの場合(MotionBoardの
     内部コンテンツストアのように入れ子になっている場合)は指定の深さまで再帰的に展開する。
     拡張子を持たないエントリ(内部ストアのボード本体・データソース定義等)も、中身の
-    先頭バイトでXML/ZIPかどうかを判定して拾う(拡張子だけに頼らない)。"""
+    先頭バイトでXML/ZIPかどうかを判定して拾う(拡張子だけに頼らない)。
+    board_name_overrideは`_apply_board_name_override`参照。再帰呼び出し・XML/JSON解析の
+    どちらにもそのまま伝播させる。"""
     records: List[AliasRecord] = []
     try:
         zf = zipfile.ZipFile(io.BytesIO(data))
@@ -602,11 +632,14 @@ def _parse_zip_bytes(data: bytes, index: ColumnIndex, label_prefix: str,
                 if depth >= _ZIP_NEST_DEPTH_LIMIT:
                     print(f"  ※{label} は入れ子ZIPの上限深度({_ZIP_NEST_DEPTH_LIMIT})に達したためスキップしました")
                     continue
-                recs = _parse_zip_bytes(content, index, label, entry_source_file, depth=depth + 1)
+                recs = _parse_zip_bytes(content, index, label, entry_source_file, depth=depth + 1,
+                                         board_name_override=board_name_override)
             elif name.lower().endswith(".xml") or content.lstrip()[:5] == b"<?xml":
-                recs = auto_parse_xml(name, content, index, source_file=entry_source_file)
+                recs = auto_parse_xml(name, content, index, source_file=entry_source_file,
+                                       board_name_override=board_name_override)
             elif name.lower().endswith(".json"):
-                recs = auto_parse_json(name, content, index, source_file=entry_source_file)
+                recs = auto_parse_json(name, content, index, source_file=entry_source_file,
+                                        board_name_override=board_name_override)
             else:
                 continue
             if recs:
@@ -666,7 +699,10 @@ def auto_parse_all(root_dir: Path, columns_path: str) -> List[AliasRecord]:
             print(f"  ※{fs_file_dir.relative_to(root_dir)} にfs-snapのスナップショットが見つかりませんでした")
             continue
         rel = str(fs_file_dir.relative_to(root_dir))
-        recs = _parse_zip_bytes(snapshot.read_bytes(), index, fs_file_dir.name, rel)
+        # フォルダ名(拡張子.fs-fileを除いた部分)が本当のボード名。中のデータソース定義
+        # 等が持つname属性(データソース自身の名前)より確実なため、これで上書きする(DD-017)
+        recs = _parse_zip_bytes(snapshot.read_bytes(), index, fs_file_dir.name, rel,
+                                 board_name_override=fs_file_dir.stem)
         all_records.extend(recs)
 
     if not all_records:

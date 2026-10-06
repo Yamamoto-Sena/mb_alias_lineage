@@ -400,6 +400,40 @@ class TestDrSumDataSourceFormat:
         assert records[0].display_name == "単価"
 
 
+class TestSearchConditionNotTreatedAsAlias:
+    """DD-023: 検索条件(事前設定フィルタ)のdispTitleがエイリアスと誤認されないことの回帰テスト。
+    実機(C:\\MotionBoard64)確認で判明した
+    <Condition><SearchCondition><PreCondition><Expression title="..." dispTitle="..."/>
+    の実構造を模したフィクスチャを使う。"""
+
+    def test_dispTitle_inside_search_condition_is_not_extracted(self):
+        content = (
+            '<?xml version="1.0" ?><BoardDefinition>'
+            '<Condition><SearchCondition><PreCondition>'
+            '<Expression enable="true" dsid="0" fid="3" title="TANKA" dispTitle="絞り込みキャプション" '
+            'dispType="INPUT" operatorType="EQUAL"/>'
+            '</PreCondition></SearchCondition></Condition>'
+            '</BoardDefinition>'
+        )
+        records = bp.auto_parse_xml("board.xml", content.encode("utf-8"), load_index())
+        assert records == []
+
+    def test_sibling_field_outside_search_condition_is_still_extracted(self):
+        # SearchCondition配下を除外しても、同じファイル内の通常のField/labelは
+        # 従来どおり検出され続けることを確認する(過剰除外の回帰防止)
+        content = (
+            '<?xml version="1.0" ?><BoardDefinition>'
+            '<Field column="TANKA" label="単価"/>'
+            '<Condition><SearchCondition><PreCondition>'
+            '<Expression title="TANKA" dispTitle="絞り込みキャプション"/>'
+            '</PreCondition></SearchCondition></Condition>'
+            '</BoardDefinition>'
+        )
+        records = bp.auto_parse_xml("board.xml", content.encode("utf-8"), load_index())
+        assert len(records) == 1
+        assert records[0].display_name == "単価"
+
+
 # ============================================================
 # DD-002-3: MotionBoardサーバー内部コンテンツストア(.fs-file/fs-snap)の走査
 # ============================================================
@@ -441,6 +475,20 @@ class TestNestedZipAndFsFileDiscovery:
 
         records = bp.auto_parse_all(tmp_path, str(COLUMNS_PATH))
         assert any(r.table_name == "T_SAMPLE" for r in records)
+
+    def test_fs_file_board_name_uses_folder_name_not_datasource_name(self, tmp_path):
+        # DD-017: データソース定義XML自身のname属性("テストデータソース")ではなく、
+        # .fs-fileフォルダ名("MyBoard")が本当のボード名としてboard_nameに入ることを確認
+        board_dir = tmp_path / "MyBoard.fs-file"
+        snap_dir = board_dir / "fs-snap"
+        snap_dir.mkdir(parents=True)
+        zip_bytes = _build_zip_bytes({"MyBoard": DRSUM_DATASOURCE_XML.encode("utf-8")})
+        (snap_dir / "snap_00000001_1000").write_bytes(zip_bytes)
+
+        records = bp.auto_parse_all(tmp_path, str(COLUMNS_PATH))
+        assert records
+        assert all(r.board_name == "MyBoard" for r in records)
+        assert not any(r.board_name == "テストデータソース" for r in records)
 
     def test_fs_file_without_snapshot_does_not_crash(self, tmp_path):
         board_dir = tmp_path / "Empty.fs-file"

@@ -6,6 +6,12 @@
       "runtimeExecutable": "python",
       "runtimeArgs": ["web_viewer.py", "--db", "demo_data/lineage.db", "--port", "8791", "--no-browser"],
       "port": 8791
+    },
+    {
+      "name": "web-viewer-root",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["web_viewer.py", "--db", "lineage.db", "--port", "8793", "--no-browser"],
+      "port": 8793
     }
   ]
 }

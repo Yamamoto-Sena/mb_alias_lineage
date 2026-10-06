@@ -219,6 +219,9 @@ INDEX_HTML = """<!DOCTYPE html>
   .board-name .sep { color: var(--text-sub); font-weight: 400; margin-left: 2px; }
   .alias-list { display: flex; flex-direction: column; }
   .alias-list .alias-line.calc { color: var(--text-sub); }
+  /* DD-022: 物理名そのまま使用(エイリアス未設定)を本物のエイリアスと区別する */
+  .alias-list .alias-line.unaliased { color: var(--text-sub); }
+  .alias-list .unaliased-tag { font-size: 0.85em; color: var(--text-sub); }
   /* DD-021論点2: 「他N件」を全表示/省略表示切り替えボタンにする */
   .board-list-rest { display: contents; }
   .board-list-rest.board-list-collapsed { display: none; }
@@ -875,9 +878,17 @@ function buildBoardAliasMap(boardDetails) {
 // ボード名を1行目(｜区切り)に、同ボードの表示名(2件目以降)・計算式使用分をその下に重ねて表示する(DD-020)
 // ボード名＋区切り線を1個のグリッドアイテムにまとめ、呼び出し元の.board-cellグリッドで
 // 複数ボード間のボード名列の幅を揃える(DD-021論点1)
-function renderBoardGroup(name, entry) {
+// physicalName(その物理カラム名)が渡された場合、物理名そのまま使用(エイリアス未設定)の
+// 表示名を本物のエイリアスと見分けがつくよう印をつける(DD-022)
+function renderBoardGroup(name, entry, physicalName) {
   const lines = [...Array.from(entry.alias), ...Array.from(entry.calc).map(c => `計算式: ${c}`)];
-  const aliasHtml = lines.map(l => `<div class="alias-line${l.startsWith('計算式: ') ? ' calc' : ''}">${escapeHtml(l)}</div>`).join('');
+  const aliasHtml = lines.map(l => {
+    const isCalc = l.startsWith('計算式: ');
+    const isUnaliased = !isCalc && physicalName !== undefined && normalizeText(l) === normalizeText(physicalName);
+    const cls = 'alias-line' + (isCalc ? ' calc' : '') + (isUnaliased ? ' unaliased' : '');
+    const tag = isUnaliased ? ' <span class="unaliased-tag">(物理名のまま)</span>' : '';
+    return `<div class="${cls}">${escapeHtml(l)}${tag}</div>`;
+  }).join('');
   return `<div class="board-group">` +
     `<span class="board-name">${escapeHtml(name)}<span class="sep">｜</span></span>` +
     `<div class="alias-list">${aliasHtml}</div></div>`;
@@ -894,7 +905,7 @@ function renderBoardsCell(r) {
   const details = boardAliasesByColumn[normalizeKey(r.table_name, r.column_name)] || [];
   if (details.length === 0) {
     if (!r.boards.length) return '-';
-    const allGroups = r.boards.map(b => renderBoardGroup(b, { alias: new Set(), calc: new Set() })).join('');
+    const allGroups = r.boards.map(b => renderBoardGroup(b, { alias: new Set(), calc: new Set() }, r.column_name)).join('');
     return `<div class="board-cell">${allGroups}</div>`;
   }
   const byBoard = new Map();
@@ -905,12 +916,12 @@ function renderBoardsCell(r) {
   });
   const boardNames = Array.from(byBoard.keys());
   // 件数が多い場合は先頭3件のみ表示し、残りは「他N件」ボタンで全表示/省略表示を切り替える(DD-018→DD-021論点2)
-  const groups = boardNames.slice(0, 3).map(name => renderBoardGroup(name, byBoard.get(name))).join('');
+  const groups = boardNames.slice(0, 3).map(name => renderBoardGroup(name, byBoard.get(name), r.column_name)).join('');
   const restNames = boardNames.slice(3);
   const fullTitle = boardNames.map(name => formatBoardText(name, byBoard.get(name))).join('\\n');
   let restHtml = '';
   if (restNames.length > 0) {
-    const restGroups = restNames.map(name => renderBoardGroup(name, byBoard.get(name))).join('');
+    const restGroups = restNames.map(name => renderBoardGroup(name, byBoard.get(name), r.column_name)).join('');
     restHtml = `<div class="board-list-rest board-list-collapsed">${restGroups}</div>` +
       `<button type="button" class="board-list-toggle" data-count="${restNames.length}">他${restNames.length}件 すべて表示</button>`;
   }
@@ -1006,12 +1017,19 @@ mainThead.addEventListener('click', (e) => {
   applyFilters();
 });
 
-// DD-021論点3: Dr.Sum実機ではdata_typeが内部の数値コードのまま返ってくることがあり、
-// 型名への対応表は未確認(doc/decisions.md D-004)のため変換はせず、数値コードである旨の注記を添える
+// DD-021論点3→DD-024: Dr.Sum実機ではdata_typeが内部の数値コードのまま返ってくることがある。
+// 実機から取得したデータ(25カラム)で0=VARCHAR/3=DATE/7=NUMERICのみ確認できた(doc/decisions.md D-004)ため、
+// この3種類だけ型名に変換する。対応表に無い値は誤った型名を出さないよう、引き続き数値+内部コード注記のままにする
+const DR_SUM_TYPE_CODE_MAP = { '0': 'VARCHAR', '3': 'DATE', '7': 'NUMERIC' };
+
 function formatDataType(dataType) {
   if (dataType === null || dataType === undefined || dataType === '') return '-';
   const text = String(dataType);
-  if (!/^-?\\d+$/.test(text.trim())) return escapeHtml(text);
+  const trimmed = text.trim();
+  if (!/^-?\\d+$/.test(trimmed)) return escapeHtml(text);
+  if (Object.prototype.hasOwnProperty.call(DR_SUM_TYPE_CODE_MAP, trimmed)) {
+    return escapeHtml(DR_SUM_TYPE_CODE_MAP[trimmed]);
+  }
   return `${escapeHtml(text)}<span class="type-code-note" title="Dr.Sum内部の数値コードです。型名への変換は未対応のため、実際のデータ型はDr.Sum管理画面でご確認ください">(内部コード)</span>`;
 }
 

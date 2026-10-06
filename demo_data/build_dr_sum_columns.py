@@ -11,6 +11,12 @@ dummygen_jp_guiの/api/export_schema_yamlは、GUIの「データの型(省略�
 GUIで実際に指定した型をこのスクリプト側で明示的に補っている。
 テーブル種別(TABLE/VIEW)もDr.Sum側の一覧特有の情報なのでここで明示する。
 
+SCHEMA_TYPE_COVERAGE(DD-021関連。テーブル定義パネルの「データ型」欄の改善に伴い、
+Dr.Sumがサポートする8種類の型を一通り画面上で確認できるようにするため追加)は、
+同じdummygen_jp_guiで別途設計したスキーマ(demo_data/dr_sum_type_schema/を参照。
+TIME/TIMESTAMP/INTERVAL/OBJECTはdummygen_jp_guiにネイティブ対応する型が無いため
+後処理で追加したもので、実データ(5,000行/テーブル)はリポジトリに含めず定義のみ転記)。
+
 使い方:
     python build_dr_sum_columns.py
 """
@@ -48,10 +54,57 @@ SCHEMA = [
     ]),
 ]
 
+# Dr.Sumがサポートする8種類の型(REAL/NUMERIC/VARCHAR/INTERVAL/DATE/TIME/TIMESTAMP/OBJECT)を
+# 偏りなくカバーするための追加スキーマ。詳細はdemo_data/dr_sum_type_schema/テーブル定義.md参照。
+# 既存SCHEMAとテーブル名・カラム名の重複が無いことを確認済み。MotionBoard側のエイリアス定義は
+# 無いため、これらの物理カラムはビューア上で「未使用」として表示される(型表示の確認が目的のため)
+SCHEMA_TYPE_COVERAGE = [
+    ("T_配送案件", "TABLE", [
+        ("配送案件コード", "VARCHAR"),
+        ("受付日時", "TIMESTAMP"),
+        ("出荷予定日", "DATE"),
+        ("配送所要時間", "INTERVAL"),
+        ("運賃", "NUMERIC"),
+    ]),
+    ("T_設備保守履歴", "TABLE", [
+        ("保守履歴番号", "VARCHAR"),
+        ("点検実施日", "DATE"),
+        ("点検開始時刻", "TIME"),
+        ("点検所要時間", "INTERVAL"),
+        ("温度測定値", "REAL"),
+        ("点検報告書添付ファイル", "OBJECT"),
+    ]),
+    ("T_契約情報", "TABLE", [
+        ("契約番号", "VARCHAR"),
+        ("契約開始日", "DATE"),
+        ("契約締結日時", "TIMESTAMP"),
+        ("契約更新猶予期間", "INTERVAL"),
+        ("契約金額", "NUMERIC"),
+        ("契約書スキャンファイル", "OBJECT"),
+    ]),
+    ("T_問い合わせ対応記録", "TABLE", [
+        ("対応履歴番号", "VARCHAR"),
+        ("受付日時", "TIMESTAMP"),
+        ("対応開始時刻", "TIME"),
+        ("対応所要時間", "INTERVAL"),
+        ("満足度評価スコア", "REAL"),
+        ("対応記録添付ファイル", "OBJECT"),
+    ]),
+    ("T_勤怠記録", "TABLE", [
+        ("勤怠記録番号", "VARCHAR"),
+        ("勤務日", "DATE"),
+        ("出勤時刻", "TIME"),
+        ("退勤時刻", "TIME"),
+        ("休憩時間", "INTERVAL"),
+        ("残業手当", "NUMERIC"),
+        ("体温測定値", "REAL"),
+    ]),
+]
+
 
 def main() -> None:
     columns_out = []
-    for table_name, table_type, columns in SCHEMA:
+    for table_name, table_type, columns in SCHEMA + SCHEMA_TYPE_COVERAGE:
         for ordinal, (column_name, data_type) in enumerate(columns, start=1):
             columns_out.append({
                 "table_name": table_name,

@@ -7,14 +7,19 @@
 ```
 demo_data/
 ├── dummygen_jp_gui(C:\dev_2\dummygen_jp_gui)で設計したスキーマ
-│   ├── dummygen_schema.yaml      # GUIのエクスポート機能で取得した実際の出力
-│   └── build_dr_sum_columns.py   # 上記スキーマ→dr_sum_columns.json形式への変換スクリプト
-├── dr_sum_columns.json           # Dr.Sum風のカラム一覧(5テーブル・13カラム)
+│   ├── dummygen_schema.yaml      # GUIのエクスポート機能で取得した実際の出力(業務テーマ13カラム分)
+│   └── build_dr_sum_columns.py   # 上記+型カバレッジスキーマ→dr_sum_columns.json形式への変換スクリプト
+├── dr_sum_type_schema/            # Dr.Sumの8型を網羅するために別途設計したスキーマの参考資料
+│   ├── README.md                  # 作成経緯・データの作り方
+│   └── テーブル定義.md             # テーブル・カラム定義書(型カバレッジ確認表つき)
+├── dr_sum_columns.json           # Dr.Sum風のカラム一覧(業務テーマ13カラム+型カバレッジ30カラム=43カラム)
 └── motionboard_backup/           # MotionBoard風のボード定義5件
     (sample_data/motionboard_backup/ の「実物に近い」サンプルと同じものを流用)
 ```
 
 `dr_sum_columns.json`は、[dummygen_jp_gui](../../../dev_2/dummygen_jp_gui)(和風ダミーデータ生成ツールのGUI)を実際に操作して設計したテーブル・カラム構成をもとに作成しました。GUIの`/api/export_schema_yaml`エンドポイントで取得したYAMLが`dummygen_schema.yaml`です(ただし2026年現在、このエンドポイントは列ごとに手動指定した「データの型」を出力に含めない仕様のため、`build_dr_sum_columns.py`側で実際にGUIで指定した型を明示的に補っています)。
+
+`dr_sum_type_schema/`は、DD-021（テーブル定義パネルの「データ型」欄改善）に伴い、Dr.Sumがサポートする8種類の型(REAL/NUMERIC/VARCHAR/INTERVAL/DATE/TIME/TIMESTAMP/OBJECT)がビューア上で一通り確認できるよう、同じdummygen_jp_guiで別途設計したスキーマです。実データ(各テーブル5,000行)はリポジトリサイズの都合で含めず、テーブル・カラム定義のみ`build_dr_sum_columns.py`の`SCHEMA_TYPE_COVERAGE`に転記しています。これらの物理カラムはMotionBoard側のエイリアス定義が無いため、ビューア上では「未使用」として表示されます(型表示の確認が目的のため、意図的な状態です)。
 
 ## 再現方法
 

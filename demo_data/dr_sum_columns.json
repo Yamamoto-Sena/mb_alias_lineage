@@ -89,5 +89,215 @@
     "column_name": "GETSUJI_URIAGE",
     "data_type": "DECIMAL",
     "ordinal": 1
+  },
+  {
+    "table_name": "T_配送案件",
+    "table_type": "TABLE",
+    "column_name": "配送案件コード",
+    "data_type": "VARCHAR",
+    "ordinal": 1
+  },
+  {
+    "table_name": "T_配送案件",
+    "table_type": "TABLE",
+    "column_name": "受付日時",
+    "data_type": "TIMESTAMP",
+    "ordinal": 2
+  },
+  {
+    "table_name": "T_配送案件",
+    "table_type": "TABLE",
+    "column_name": "出荷予定日",
+    "data_type": "DATE",
+    "ordinal": 3
+  },
+  {
+    "table_name": "T_配送案件",
+    "table_type": "TABLE",
+    "column_name": "配送所要時間",
+    "data_type": "INTERVAL",
+    "ordinal": 4
+  },
+  {
+    "table_name": "T_配送案件",
+    "table_type": "TABLE",
+    "column_name": "運賃",
+    "data_type": "NUMERIC",
+    "ordinal": 5
+  },
+  {
+    "table_name": "T_設備保守履歴",
+    "table_type": "TABLE",
+    "column_name": "保守履歴番号",
+    "data_type": "VARCHAR",
+    "ordinal": 1
+  },
+  {
+    "table_name": "T_設備保守履歴",
+    "table_type": "TABLE",
+    "column_name": "点検実施日",
+    "data_type": "DATE",
+    "ordinal": 2
+  },
+  {
+    "table_name": "T_設備保守履歴",
+    "table_type": "TABLE",
+    "column_name": "点検開始時刻",
+    "data_type": "TIME",
+    "ordinal": 3
+  },
+  {
+    "table_name": "T_設備保守履歴",
+    "table_type": "TABLE",
+    "column_name": "点検所要時間",
+    "data_type": "INTERVAL",
+    "ordinal": 4
+  },
+  {
+    "table_name": "T_設備保守履歴",
+    "table_type": "TABLE",
+    "column_name": "温度測定値",
+    "data_type": "REAL",
+    "ordinal": 5
+  },
+  {
+    "table_name": "T_設備保守履歴",
+    "table_type": "TABLE",
+    "column_name": "点検報告書添付ファイル",
+    "data_type": "OBJECT",
+    "ordinal": 6
+  },
+  {
+    "table_name": "T_契約情報",
+    "table_type": "TABLE",
+    "column_name": "契約番号",
+    "data_type": "VARCHAR",
+    "ordinal": 1
+  },
+  {
+    "table_name": "T_契約情報",
+    "table_type": "TABLE",
+    "column_name": "契約開始日",
+    "data_type": "DATE",
+    "ordinal": 2
+  },
+  {
+    "table_name": "T_契約情報",
+    "table_type": "TABLE",
+    "column_name": "契約締結日時",
+    "data_type": "TIMESTAMP",
+    "ordinal": 3
+  },
+  {
+    "table_name": "T_契約情報",
+    "table_type": "TABLE",
+    "column_name": "契約更新猶予期間",
+    "data_type": "INTERVAL",
+    "ordinal": 4
+  },
+  {
+    "table_name": "T_契約情報",
+    "table_type": "TABLE",
+    "column_name": "契約金額",
+    "data_type": "NUMERIC",
+    "ordinal": 5
+  },
+  {
+    "table_name": "T_契約情報",
+    "table_type": "TABLE",
+    "column_name": "契約書スキャンファイル",
+    "data_type": "OBJECT",
+    "ordinal": 6
+  },
+  {
+    "table_name": "T_問い合わせ対応記録",
+    "table_type": "TABLE",
+    "column_name": "対応履歴番号",
+    "data_type": "VARCHAR",
+    "ordinal": 1
+  },
+  {
+    "table_name": "T_問い合わせ対応記録",
+    "table_type": "TABLE",
+    "column_name": "受付日時",
+    "data_type": "TIMESTAMP",
+    "ordinal": 2
+  },
+  {
+    "table_name": "T_問い合わせ対応記録",
+    "table_type": "TABLE",
+    "column_name": "対応開始時刻",
+    "data_type": "TIME",
+    "ordinal": 3
+  },
+  {
+    "table_name": "T_問い合わせ対応記録",
+    "table_type": "TABLE",
+    "column_name": "対応所要時間",
+    "data_type": "INTERVAL",
+    "ordinal": 4
+  },
+  {
+    "table_name": "T_問い合わせ対応記録",
+    "table_type": "TABLE",
+    "column_name": "満足度評価スコア",
+    "data_type": "REAL",
+    "ordinal": 5
+  },
+  {
+    "table_name": "T_問い合わせ対応記録",
+    "table_type": "TABLE",
+    "column_name": "対応記録添付ファイル",
+    "data_type": "OBJECT",
+    "ordinal": 6
+  },
+  {
+    "table_name": "T_勤怠記録",
+    "table_type": "TABLE",
+    "column_name": "勤怠記録番号",
+    "data_type": "VARCHAR",
+    "ordinal": 1
+  },
+  {
+    "table_name": "T_勤怠記録",
+    "table_type": "TABLE",
+    "column_name": "勤務日",
+    "data_type": "DATE",
+    "ordinal": 2
+  },
+  {
+    "table_name": "T_勤怠記録",
+    "table_type": "TABLE",
+    "column_name": "出勤時刻",
+    "data_type": "TIME",
+    "ordinal": 3
+  },
+  {
+    "table_name": "T_勤怠記録",
+    "table_type": "TABLE",
+    "column_name": "退勤時刻",
+    "data_type": "TIME",
+    "ordinal": 4
+  },
+  {
+    "table_name": "T_勤怠記録",
+    "table_type": "TABLE",
+    "column_name": "休憩時間",
+    "data_type": "INTERVAL",
+    "ordinal": 5
+  },
+  {
+    "table_name": "T_勤怠記録",
+    "table_type": "TABLE",
+    "column_name": "残業手当",
+    "data_type": "NUMERIC",
+    "ordinal": 6
+  },
+  {
+    "table_name": "T_勤怠記録",
+    "table_type": "TABLE",
+    "column_name": "体温測定値",
+    "data_type": "REAL",
+    "ordinal": 7
   }
 ]

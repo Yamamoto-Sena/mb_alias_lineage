@@ -1,0 +1,13 @@
+{
+  "board": {
+    "boardName": "関西商品一覧",
+    "panels": [
+      {
+        "panelId": "panel-kansai-1",
+        "fields": [
+          {"physicalColumn": "SHOHIN_NAME", "displayLabel": "商品名称"}
+        ]
+      }
+    ]
+  }
+}

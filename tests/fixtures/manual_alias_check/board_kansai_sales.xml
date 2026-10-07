@@ -1,0 +1,7 @@
+<Board name="関西エリア売上">
+  <Item id="kansai-001">
+    <Field column="URIAGE_KIN" label="関西売上金額" table="T_売上明細"/>
+    <Field column="CHIIKI_KBN" label="地区区分" table="T_売上明細"/>
+    <Field column="TANKA"/>
+  </Item>
+</Board>

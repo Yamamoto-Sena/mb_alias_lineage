@@ -1,0 +1,6 @@
+[
+  {"table_name": "T_売上明細", "table_type": "TABLE", "column_name": "URIAGE_KIN", "data_type": "DECIMAL", "ordinal": 1},
+  {"table_name": "T_売上明細", "table_type": "TABLE", "column_name": "CHIIKI_KBN", "data_type": "VARCHAR", "ordinal": 2},
+  {"table_name": "T_商品M", "table_type": "TABLE", "column_name": "TANKA", "data_type": "DECIMAL", "ordinal": 1},
+  {"table_name": "T_商品M", "table_type": "TABLE", "column_name": "SHOHIN_NAME", "data_type": "VARCHAR", "ordinal": 2}
+]

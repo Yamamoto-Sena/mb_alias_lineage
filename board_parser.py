@@ -98,6 +98,15 @@ def _contains_japanese(s: str) -> bool:
     return bool(JAPANESE_RE.search(s))
 
 
+def _looks_like_boolean_literal(value: str) -> bool:
+    """値が"true"/"false"のような真偽値リテラルかどうかを判定する(DD-028)。
+    ON/OFF等のフラグ属性(例: disp="true")の値であり、属性名が偶然
+    LABEL_KEY_HINTSに一致してもラベル候補にしないためのガード。"""
+    return value.strip().lower() in ("true", "false")
+
+
+
+
 def _looks_like_label_key(key: str) -> bool:
     key_lower = key.lower()
     return any(hint in key_lower for hint in LABEL_KEY_HINTS)
@@ -358,16 +367,20 @@ def auto_parse_xml(source_name: str, content: bytes, index: ColumnIndex,
 
     def find_label_on_element(el: ET.Element, matched_key: Optional[str], matched_val: str) -> Optional[str]:
         matched_val = matched_val.strip()
+        # 値が真偽値リテラル(true/false)の属性は、表示ON/OFF等のフラグであり
+        # カラムのエイリアス(表示名)ではないため、属性名に関わらず候補から除外する(DD-028)
         candidates = [(k, v) for k, v in el.attrib.items()
-                      if k != matched_key and v.strip() != matched_val and v.strip()]
+                      if k != matched_key and v.strip() != matched_val and v.strip()
+                      and not _looks_like_boolean_literal(v)]
         for k, v in candidates:
             if _looks_like_label_key(k):
                 return v
         for k, v in candidates:
             if _contains_japanese(v):
                 return v
-        if candidates:
-            return candidates[0][1]
+        # ラベルらしい属性名にも日本語にも一致する候補が無い場合、残った候補を無条件に
+        # 採用する「最終フォールバック」は、型名・連番・フラグ等の無関係な構造的属性を
+        # 誤ってエイリアスとして拾ってしまうため撤廃した(DD-028)。
         # 同じ要素に手がかりが無ければ、子要素(タグ名がラベルっぽい/日本語テキストを持つ)を見る
         for child in el:
             child_text = (child.text or "").strip()

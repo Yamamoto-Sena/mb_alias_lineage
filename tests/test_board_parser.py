@@ -497,6 +497,68 @@ class TestItemOrderChangeNotTreatedAsAlias:
         assert records[0].display_name == "単価"
 
 
+class TestDsDefItemDispFlagNotTreatedAsAlias:
+    """DD-028: データソース定義(dsDef)内Item要素の表示ON/OFFフラグ属性(disp)が、
+    aliasTitleが空の場合にカラムのエイリアスと誤認されないことの回帰テスト。
+    実機(C:\\MotionBoard64、達成率ダッシュボード.fs-file)で判明した
+    <Item title="価格" aliasTitle="" disp="true"> の実構造を模したフィクスチャを使う。"""
+
+    def test_disp_true_with_empty_alias_title_is_not_extracted(self):
+        # Bug#001: aliasTitleが空のため候補から除外された後、属性キーdisp自体が
+        # LABEL_KEY_HINTSの"disp"に一致し、値"true"が誤ってエイリアスとして
+        # 採用されないこと(本来はラベルらしい手がかりが無いため記録自体がスキップされる)
+        content = (
+            '<?xml version="1.0" ?><BoardDefinition name="達成率ダッシュボード">'
+            '<DsDef name="月次売上明細">'
+            '<Item id="9" fid="9" title="TANKA" aliasTitle="" type="NUMBER" disp="true" orderNum="9"/>'
+            '</DsDef>'
+            '</BoardDefinition>'
+        )
+        records = bp.auto_parse_xml("board.xml", content.encode("utf-8"), load_index())
+        assert records == []
+
+    def test_disp_false_with_empty_alias_title_is_not_extracted(self):
+        # disp="false"の場合も同様に、真偽値リテラルがラベルとして拾われないこと
+        content = (
+            '<?xml version="1.0" ?><BoardDefinition name="達成率ダッシュボード">'
+            '<DsDef name="月次売上明細">'
+            '<Item id="9" fid="9" title="TANKA" aliasTitle="" type="NUMBER" disp="false" orderNum="9"/>'
+            '</DsDef>'
+            '</BoardDefinition>'
+        )
+        records = bp.auto_parse_xml("board.xml", content.encode("utf-8"), load_index())
+        assert records == []
+
+    def test_disp_true_with_non_empty_alias_title_is_still_extracted(self):
+        # aliasTitleが設定されている場合は、disp="true"があっても
+        # 従来どおり正規のエイリアスが検出され続けること(過剰除外の回帰防止)
+        content = (
+            '<?xml version="1.0" ?><BoardDefinition name="達成率ダッシュボード">'
+            '<DsDef name="月次売上明細">'
+            '<Item id="9" fid="9" title="TANKA" aliasTitle="単価" type="NUMBER" disp="true" orderNum="9"/>'
+            '</DsDef>'
+            '</BoardDefinition>'
+        )
+        records = bp.auto_parse_xml("board.xml", content.encode("utf-8"), load_index())
+        assert len(records) == 1
+        assert records[0].display_name == "単価"
+
+    def test_sibling_field_outside_dsdef_is_still_extracted(self):
+        # dsDef内のdisp="true"誤抽出を塞いでも、同じファイル内の通常のField/labelは
+        # 従来どおり検出され続けることを確認する(過剰除外の回帰防止)
+        content = (
+            '<?xml version="1.0" ?><BoardDefinition name="達成率ダッシュボード">'
+            '<Field column="TANKA" label="単価"/>'
+            '<DsDef name="月次売上明細">'
+            '<Item id="9" fid="9" title="TANKA" aliasTitle="" type="NUMBER" disp="true" orderNum="9"/>'
+            '</DsDef>'
+            '</BoardDefinition>'
+        )
+        records = bp.auto_parse_xml("board.xml", content.encode("utf-8"), load_index())
+        assert len(records) == 1
+        assert records[0].display_name == "単価"
+
+
 # ============================================================
 # DD-002-3: MotionBoardサーバー内部コンテンツストア(.fs-file/fs-snap)の走査
 # ============================================================

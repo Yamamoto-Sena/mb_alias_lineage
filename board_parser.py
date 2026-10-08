@@ -239,6 +239,22 @@ def _find_columns_in_formula(index: ColumnIndex, value: str) -> List[str]:
     return found
 
 
+def _looks_like_structural_value(value: str, matched_columns: List[str]) -> bool:
+    """計算式らしい値(`_looks_like_formula_value`がTrueを返した値)が、実際には計算式ではなく
+    インデックス・真偽値フラグ等を演算子で区切って並べた構造的なシリアライズ値かどうかを判定する
+    (結合データソースの対応関係マッピング等。例: "1/store_name/true//2//true//3//true/true"。DD-030)。
+    マッチした物理カラム名トークン以外に`true`/`false`という真偽値リテラルのトークンが
+    最低1つ含まれ、かつそれ以外の全トークンが数字または真偽値リテラルのみで構成される場合に
+    限って構造的な値と判定する。"true"/"false"という単語が業務上の計算式の定数(税率・掛け率等)
+    に現れることは通常無いため、この条件を必須にすることで「TANKA * 2」「URIAGE_KIN * 1.08」
+    のような、カラム名に数値定数を掛けるだけの正当な計算式まで誤って対象外にしないようにする。"""
+    matched_upper = {c.upper() for c in matched_columns}
+    other_tokens = [t for t in _FORMULA_TOKEN_RE.findall(value) if t.upper() not in matched_upper]
+    if not any(_looks_like_boolean_literal(t) for t in other_tokens):
+        return False
+    return all(t.isdigit() or _looks_like_boolean_literal(t) for t in other_tokens)
+
+
 # ============================================================
 # MotionBoardの実データソース定義(<DataSource type="drsum">)専用の抽出
 # ============================================================
@@ -444,7 +460,9 @@ def auto_parse_xml(source_name: str, content: bytes, index: ColumnIndex,
                 # 完全一致はしないが、計算式らしい値の中に物理カラム名が
                 # 部分文字列として埋め込まれていないか調べる(カスタム項目・事後計算項目対策)
                 cols_in_formula = _find_columns_in_formula(index, attr_val)
-                if cols_in_formula:
+                # マッチしたカラム名以外が数字・真偽値リテラルのみの値は、計算式ではなく
+                # 結合データソース等の構造的なシリアライズ値とみなし対象外とする(DD-030)
+                if cols_in_formula and not _looks_like_structural_value(attr_val, cols_in_formula):
                     calc_name = find_label_on_element(el, attr_key, attr_val) or attr_val
                     for col_upper in cols_in_formula:
                         table_name = index.resolve_table(col_upper, list(el.attrib.values()))
@@ -586,7 +604,9 @@ def auto_parse_json(source_name: str, content: bytes, index: ColumnIndex,
                         # 完全一致はしないが、計算式らしい値の中に物理カラム名が
                         # 部分文字列として埋め込まれていないか調べる(カスタム項目・事後計算項目対策)
                         cols_in_formula = _find_columns_in_formula(index, v)
-                        if cols_in_formula:
+                        # マッチしたカラム名以外が数字・真偽値リテラルのみの値は、計算式ではなく
+                        # 結合データソース等の構造的なシリアライズ値とみなし対象外とする(DD-030)
+                        if cols_in_formula and not _looks_like_structural_value(v, cols_in_formula):
                             calc_name = find_label_in_dict(node, k, v) or v
                             context_values = [x for x in node.values() if isinstance(x, str)]
                             for col_upper in cols_in_formula:

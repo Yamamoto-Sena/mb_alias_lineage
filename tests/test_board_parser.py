@@ -159,6 +159,24 @@ class TestFormulaHeuristicHelpers:
         index = load_index()
         assert bp._find_columns_in_formula(index, "1 + 1") == []
 
+    def test_looks_like_structural_value_rejects_index_flag_serialization(self):
+        # DD-030: 結合データソースの対応関係マッピングとみられる、数字・真偽値リテラルを
+        # "/"区切りで並べた値(たまたまカラム名を含む)は構造的な値と判定する
+        value = "1/TANKA/true//2//true//3//true/true"
+        assert bp._looks_like_structural_value(value, ["TANKA"]) is True
+
+    def test_looks_like_structural_value_accepts_real_formula(self):
+        # 実際の計算式(カラム名同士を演算子でつないだもの)は構造的な値と判定しない
+        assert bp._looks_like_structural_value("[URIAGE_KIN]/[TANKA]", ["URIAGE_KIN", "TANKA"]) is False
+        assert bp._looks_like_structural_value("URIAGE_KIN / SUM(URIAGE_KIN) * 100", ["URIAGE_KIN"]) is False
+
+    def test_looks_like_structural_value_accepts_formula_with_numeric_constant(self):
+        # true/falseという真偽値リテラルを含まない場合、他のトークンが数字だけでも
+        # 税率・掛け率等の定数を使う正当な計算式の可能性があるため構造的な値とは判定しない
+        # (過剰除外の回帰防止)
+        assert bp._looks_like_structural_value("TANKA * 2", ["TANKA"]) is False
+        assert bp._looks_like_structural_value("URIAGE_KIN * 1.08", ["URIAGE_KIN"]) is False
+
     def test_record_root_file_strips_zip_entry(self):
         assert bp._record_root_file("backup.zip:entry.xml") == "backup.zip"
         assert bp._record_root_file("plain.xml") == "plain.xml"
@@ -557,6 +575,50 @@ class TestDsDefItemDispFlagNotTreatedAsAlias:
         records = bp.auto_parse_xml("board.xml", content.encode("utf-8"), load_index())
         assert len(records) == 1
         assert records[0].display_name == "単価"
+
+
+class TestUnionDataSourceMappingNotTreatedAsCalc:
+    """DD-030: 結合データソース(複数データソースを統合する機能)が持つとみられる、
+    各データソースの対応カラム・有効フラグを"/"区切りでシリアライズした構造的な属性値が、
+    たまたま物理カラム名を含むことで計算式(usage_type='calc')と誤認されないことの回帰テスト。
+    実機(`DATALIZER_PRACTICE`接続、09_結合データソース)で判明した
+    display_name="1/store_name/true//2//true//3//true/true" の実データを模したフィクスチャを使う。"""
+
+    def test_union_mapping_attribute_is_not_extracted_as_calc(self):
+        content = (
+            '<?xml version="1.0" ?><BoardDefinition name="09_結合データソース">'
+            '<Item id="6" unionMapping="1/TANKA/true//2//true//3//true/true"/>'
+            '</BoardDefinition>'
+        )
+        records = bp.auto_parse_xml("board.xml", content.encode("utf-8"), load_index())
+        assert records == []
+
+    def test_sibling_field_outside_union_mapping_is_still_extracted(self):
+        # 構造的な値の誤抽出を塞いでも、同じファイル内の通常のField/labelは
+        # 従来どおり検出され続けることを確認する(過剰除外の回帰防止)
+        content = (
+            '<?xml version="1.0" ?><BoardDefinition name="09_結合データソース">'
+            '<Field column="TANKA" label="単価"/>'
+            '<Item id="6" unionMapping="1/TANKA/true//2//true//3//true/true"/>'
+            '</BoardDefinition>'
+        )
+        records = bp.auto_parse_xml("board.xml", content.encode("utf-8"), load_index())
+        assert len(records) == 1
+        assert records[0].display_name == "単価"
+
+    def test_real_formula_sharing_slash_operator_is_still_extracted(self):
+        # "/"を含む値全般を除外対象にしたわけではないこと(過剰除外の回帰防止)。
+        # 実際の計算式(カラム名同士を演算子でつないだだけの値)は従来どおり検出される
+        content = (
+            '<?xml version="1.0" ?><BoardDefinition name="利益率分析2">'
+            '<Item id="calc-002" formula="[URIAGE_KIN]/[TANKA]"/>'
+            '</BoardDefinition>'
+        )
+        records = bp.auto_parse_xml("board.xml", content.encode("utf-8"), load_index())
+        columns_found = {r.column_name for r in records}
+        assert columns_found == {"URIAGE_KIN", "TANKA"}
+        for r in records:
+            assert r.usage_type == "calc"
 
 
 # ============================================================

@@ -6,7 +6,6 @@
 
 | DD | 件名 | ステータス | 補足 |
 |----|------|-----------|------|
-| DD-014 | ビューア利用者目線の改善4件 | 完了 | 4件とも実機確認・受け入れ基準達成。verification.md/V001仕様書更新済み |
 
 ## 保留・見送り
 
@@ -31,6 +30,7 @@
 | DD-017 | fs-file取込時のボード名誤り修正 | board_name_overrideで.fs-fileフォルダ名を優先するよう修正。pytest 142件パス |
 | DD-016 | ビューア使いやすさ改善6件 | 6件とも実機確認・受け入れ基準達成。V001仕様書更新済み |
 | DD-015 | READMEからdocへの導線追加 | README.mdに関連ドキュメント3件へのリンクを追加。pytest 141件パス |
+| DD-014 | ビューア利用者目線の改善4件 | 4件とも実機確認・受け入れ基準達成。verification.md/V001仕様書更新済み |
 | DD-013 | project-overview新規作成 | doc/project-overview.md を新規作成。pytest 141件パス |
 | DD-012 | 意思決定記録とパターン集の遡及昇格 | decisions.mdにD-001〜D-007、engineering-patterns.mdに2〜7を追記。pytest 141件パス |
 | DD-011 | ビューア画面仕様書の新規作成 | doc/spec/V001_カラムエイリアス使用状況ビューア.md を新規作成。pytest 141件パス |

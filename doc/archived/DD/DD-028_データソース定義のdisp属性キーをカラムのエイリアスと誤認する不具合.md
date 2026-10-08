@@ -55,7 +55,7 @@ dsDef内の`<Item id="9" fid="9" title="価格" aliasTitle="" type="NUMBER" disp
 ## エビデンス配置
 
 ```
-doc/DD/DD-028/
+doc/archived/DD/DD-028/
   cause-analysis.md      # 原因分析（詳細・コードレベル）
   bug-report.md          # 修正前バグ再現ドキュメント(Phase 0で作成)
   verification.md        # 修正後検証ドキュメント(Phase 2で作成)

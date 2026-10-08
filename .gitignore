@@ -15,6 +15,11 @@ _tmp_*
 /*.history.json
 /naming_whitelist.json
 
+# ユーザーが実機Dr.Sumから取得した実データ(dr_sum_metadata.py --out real_columns.json)。
+# DD-024/DD-027の検証エビデンスとして文書中で言及されるが、環境固有の実データのため
+# リポジトリにはコミットしない(ルート直下のみ対象)
+/real_columns.json
+
 # レビュー共有用に export_static.py で書き出す一時HTML(用途ごとに使い捨て)
 /for_review_check.html
 

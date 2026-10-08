@@ -23,6 +23,7 @@ import os
 import sqlite3
 import subprocess
 import sys
+import tempfile
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -260,6 +261,7 @@ INDEX_HTML = """<!DOCTYPE html>
     </div>
     <pre><code id="update-cmd-output"></code></pre>
     <button class="load-btn" id="copy-update-cmd-btn" type="button">コピー</button>
+    <button class="load-btn" id="open-terminal-btn" type="button">ターミナルを開く</button>
     <span id="update-cmd-status"></span>
     <p>詳細はREADME.mdを参照してください。</p>
   </details>
@@ -378,6 +380,10 @@ INDEX_HTML = """<!DOCTYPE html>
   </table>
 
   <h2 id="excluded-aliases-heading" title="ボード定義自身が別DB向けと申告している(接続中のDBと所属DBが異なることが確定している)ため、不一致候補一覧には含めず除外したエイリアスです">他DBのボードのため除外</h2>
+  <div class="toolbar">
+    <input type="text" id="excluded-aliases-search"
+           placeholder="表示名(エイリアス)・物理カラム名・テーブル名・ボード名・所属DBで検索(エイリアス名だけ分かっていて所属DBが不明な場合はこちら)">
+  </div>
   <div id="excluded-aliases-empty" class="empty" style="display:none">除外したエイリアスはありません</div>
   <table id="excluded-aliases-table" style="display:none">
     <thead>
@@ -412,6 +418,7 @@ let sortColumn = null; // null | 'table_name' | 'column_name' | 'display_name' |
 let sortDirection = 'asc'; // 'asc' | 'desc'
 let columnOrder = ['table_name', 'column_name', 'display_name', 'usage_count', 'boards']; // 表示上の列の並び順(左→右)
 let selectedBoardName = ''; // ボード別ドリルダウンで選択中のボード名(DD-014: データ再読込後も選択状態を保持するため)
+let allExcludedAliases = []; // 「他DBのボードのため除外」テーブルの全件(DD-029: 専用検索欄でのフィルタに使う)
 
 // Python側のLARGE_DATASET_WARNING_THRESHOLD(web_viewer.py)と同じ値に保つこと(DD-014)
 const LARGE_DATASET_WARNING_THRESHOLD = 3000;
@@ -713,7 +720,22 @@ function renderAll(rows, patterns, boardDetails, whitelistEntries, excludedAlias
   renderSimilarPairs(patterns.similar_pairs || []);
   renderWhitelist(whitelistEntries);
   initBoardDrilldown(boardDetails);
-  renderExcludedAliases(excludedAliases || []);
+  allExcludedAliases = excludedAliases || [];
+  applyExcludedAliasesFilter();
+}
+
+function matchesExcludedSearch(e, q) {
+  if (!q) return true;
+  return (e.source_db || '').toLowerCase().includes(q) ||
+    (e.table_name || '').toLowerCase().includes(q) ||
+    (e.column_name || '').toLowerCase().includes(q) ||
+    (e.display_name || '').toLowerCase().includes(q) ||
+    (e.board_name || '').toLowerCase().includes(q);
+}
+
+function applyExcludedAliasesFilter() {
+  const q = document.getElementById('excluded-aliases-search').value.trim().toLowerCase();
+  renderExcludedAliases(allExcludedAliases.filter(e => matchesExcludedSearch(e, q)));
 }
 
 async function load() {
@@ -1237,15 +1259,19 @@ function renderWhitelist(entries) {
 }
 
 // DD-026: ボード定義自身が別DB向けと申告しているため除外したエイリアスを画面下部に表示する
+// DD-029: 専用検索欄でのフィルタ後に呼ばれるため、見出しの件数は全件数(allExcludedAliases)で固定する
 function renderExcludedAliases(items) {
   const heading = document.getElementById('excluded-aliases-heading');
   const table = document.getElementById('excluded-aliases-table');
   const tbody = document.getElementById('excluded-aliases-tbody');
   const empty = document.getElementById('excluded-aliases-empty');
-  heading.textContent = `他DBのボードのため除外（${(items || []).length}件）`;
+  heading.textContent = `他DBのボードのため除外（${allExcludedAliases.length}件）`;
   if (!items || items.length === 0) {
     tbody.innerHTML = '';
     table.style.display = 'none';
+    empty.textContent = allExcludedAliases.length === 0
+      ? '除外したエイリアスはありません'
+      : '検索条件に一致するエイリアスはありません';
     empty.style.display = 'block';
     return;
   }
@@ -1345,6 +1371,7 @@ function renderDrilldown(boardName) {
 }
 
 document.getElementById('search').addEventListener('input', applyFilters);
+document.getElementById('excluded-aliases-search').addEventListener('input', applyExcludedAliasesFilter);
 
 document.getElementById('clear-filter').addEventListener('click', () => {
   activeCardFilter = null;
@@ -1461,6 +1488,7 @@ document.getElementById('do-connect-btn').addEventListener('click', async () => 
 
 if (STATIC_EXPORT) {
   document.getElementById('mode-connect-btn').style.display = 'none';
+  document.getElementById('open-terminal-btn').style.display = 'none'; // 静的HTMLにはサーバーが無く/api/open_terminalを呼べない(DD-029)
 }
 
 const UPDATE_CMD_FIELDS = [
@@ -1517,6 +1545,32 @@ document.getElementById('copy-update-cmd-btn').addEventListener('click', async (
   const ok = await copyTextToClipboard(document.getElementById('update-cmd-output').textContent);
   statusEl.textContent = ok ? 'コピーしました' : 'コピーに失敗しました。手動で選択してコピーしてください';
   setTimeout(() => { statusEl.textContent = ''; }, 2500);
+});
+
+document.getElementById('open-terminal-btn').addEventListener('click', async () => {
+  const statusEl = document.getElementById('update-cmd-status');
+  const command = document.getElementById('update-cmd-output').textContent;
+  const unfilled = UPDATE_CMD_FIELDS.filter(f => !document.getElementById(f.id).value.trim());
+  if (unfilled.length > 0) {
+    statusEl.textContent = '未入力の項目があります(' + unfilled.map(f => f.placeholder).join('・') +
+      ')。入力してから「ターミナルを開く」を押してください';
+    return;
+  }
+  statusEl.textContent = 'ターミナルを起動中...';
+  try {
+    const res = await fetch('/api/open_terminal', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({command}),
+    });
+    const data = await res.json();
+    statusEl.textContent = res.ok
+      ? 'ターミナルを開きました(コマンドは入力済み・未実行です。確認してEnterを押してください)'
+      : 'エラー: ' + (data.error || `HTTP ${res.status}`);
+  } catch (err) {
+    statusEl.textContent = 'エラー: ' + err.message;
+  }
+  setTimeout(() => { statusEl.textContent = ''; }, 5000);
 });
 
 renderTableHeader();
@@ -1728,6 +1782,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_whitelist_delete(body)
         elif parsed.path == "/api/connect":
             self._handle_connect(body)
+        elif parsed.path == "/api/open_terminal":
+            self._handle_open_terminal(body)
         else:
             self.send_response(404)
             self.end_headers()
@@ -1821,6 +1877,57 @@ class Handler(BaseHTTPRequestHandler):
             )
             return
         self._send_json({"ok": True, "output": result.stdout})
+
+    def _handle_open_terminal(self, body: dict) -> None:
+        """DD-029: 更新コマンドをクリップボードに乗せた状態でcmd.exeを新規起動し、
+        その場でCtrl+Vペーストする(Enterは送らないため未実行のまま、ユーザー自身の
+        実行判断を介さずにコマンドが走ることはない)。Windows専用。
+
+        SendKeysによるペーストはタイミング依存で失敗することがあるが、その場合も
+        クリップボードにはコマンドが残っているため手動貼り付け(Ctrl+V)で代替できる。
+        """
+        command = body.get("command")
+        if not isinstance(command, str) or not command.strip():
+            self._send_json({"error": "commandは必須です"}, status=400)
+            return
+        if os.name != "nt":
+            self._send_json({"error": "この機能はWindows専用です"}, status=400)
+            return
+
+        project_dir = str(Path(__file__).resolve().parent)
+        window_title = f"mb_alias_lineage_terminal_{os.getpid()}_{id(body)}"
+        cmd_file = None
+        try:
+            # encoding="utf-8-sig"でBOMを付与する(BOM無しだとWindows PowerShell 5.1の
+            # Get-ContentがシステムのANSIコードページ(日本語環境ではCP932)で読んでしまい、
+            # 日本語を含むコマンドが文字化けする。-Encoding utf8も明示して二重に防ぐ
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".txt", delete=False, encoding="utf-8-sig"
+            ) as f:
+                f.write(command)
+                cmd_file = f.name
+
+            subprocess.Popen(
+                ["cmd.exe", "/k", f"title {window_title}"],
+                cwd=project_dir,
+                creationflags=subprocess.CREATE_NEW_CONSOLE,
+            )
+            paste_script = (
+                f"$cmdText = Get-Content -Raw -Encoding utf8 -Path '{cmd_file}'; "
+                "Set-Clipboard -Value $cmdText; "
+                "Start-Sleep -Milliseconds 700; "
+                "Add-Type -AssemblyName Microsoft.VisualBasic; "
+                f"[Microsoft.VisualBasic.Interaction]::AppActivate('{window_title}'); "
+                "Start-Sleep -Milliseconds 200; "
+                "Add-Type -AssemblyName System.Windows.Forms; "
+                "[System.Windows.Forms.SendKeys]::SendWait('^v'); "
+                f"Remove-Item -Path '{cmd_file}' -ErrorAction SilentlyContinue"
+            )
+            subprocess.Popen(["powershell", "-NoProfile", "-Command", paste_script])
+        except OSError as e:
+            self._send_json({"error": f"ターミナルの起動に失敗しました: {e}"}, status=500)
+            return
+        self._send_json({"ok": True})
 
     def _send_html(self, html: str) -> None:
         body = html.encode("utf-8")

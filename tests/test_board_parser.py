@@ -447,6 +447,56 @@ class TestSearchConditionNotTreatedAsAlias:
         assert records[0].display_name == "単価"
 
 
+class TestItemOrderChangeNotTreatedAsAlias:
+    """DD-027: 集計表(クロス集計)パーツの軸設定(ItemOrderChange)配下の他軸属性・
+    selected属性がエイリアスと誤認されないことの回帰テスト。実機(C:\\MotionBoard64、
+    地域別売上.fs-file)確認で判明した
+    <ItemOrderChange category="支店" series="年度" summary="売上額">
+      <CategoryDisp><Item label="支店" data="支店" selected="true" fid="6"></Item></CategoryDisp>
+    の実構造を模したフィクスチャを使う。"""
+
+    def test_other_axis_attribute_inside_item_order_change_is_not_extracted(self):
+        # Bug#001: category(行軸)="TANKA"と同一要素のseries(列軸)="年度"が
+        # TANKAのエイリアスとして誤って拾われないこと
+        content = (
+            '<?xml version="1.0" ?><BoardDefinition>'
+            '<ItemOrderChange category="TANKA" series="年度" summary="売上額">'
+            '</ItemOrderChange>'
+            '</BoardDefinition>'
+        )
+        records = bp.auto_parse_xml("board.xml", content.encode("utf-8"), load_index())
+        assert records == []
+
+    def test_selected_attribute_inside_item_order_change_is_not_extracted(self):
+        # Bug#002: label/dataが物理カラム名と値一致して候補から除外された後、
+        # 残る selected="true" が最終フォールバックで誤って拾われないこと。
+        # 外側のItemOrderChange自身の属性はどの物理カラムとも一致しない値にして、
+        # 検証対象(CategoryDisp配下のItem)の挙動だけを切り出す
+        content = (
+            '<?xml version="1.0" ?><BoardDefinition>'
+            '<ItemOrderChange category="X" series="Y" summary="Z">'
+            '<CategoryDisp><Item label="TANKA" data="TANKA" selected="true" fid="6"></Item></CategoryDisp>'
+            '</ItemOrderChange>'
+            '</BoardDefinition>'
+        )
+        records = bp.auto_parse_xml("board.xml", content.encode("utf-8"), load_index())
+        assert records == []
+
+    def test_sibling_field_outside_item_order_change_is_still_extracted(self):
+        # ItemOrderChange配下を除外しても、同じファイル内の通常のField/labelは
+        # 従来どおり検出され続けることを確認する(過剰除外の回帰防止)
+        content = (
+            '<?xml version="1.0" ?><BoardDefinition>'
+            '<Field column="TANKA" label="単価"/>'
+            '<ItemOrderChange category="TANKA" series="年度" summary="売上額">'
+            '</ItemOrderChange>'
+            '</BoardDefinition>'
+        )
+        records = bp.auto_parse_xml("board.xml", content.encode("utf-8"), load_index())
+        assert len(records) == 1
+        assert records[0].display_name == "単価"
+
+
 # ============================================================
 # DD-002-3: MotionBoardサーバー内部コンテンツストア(.fs-file/fs-snap)の走査
 # ============================================================

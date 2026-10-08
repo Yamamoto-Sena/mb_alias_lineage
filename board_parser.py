@@ -52,10 +52,15 @@ JAPANESE_RE = re.compile(r"[぀-ヿ㐀-鿿]")  # ひらがな・カタカナ・�
 LABEL_KEY_HINTS = ("label", "disp", "name", "alias", "title", "caption", "表示", "名称")
 ID_KEY_HINTS = ("id", "no", "seq", "key", "index", "番号", "コード")
 NAME_KEY_HINTS = ("name", "title", "caption", "名称", "ボード")
-# 実機確認(DD-023)で判明した「検索条件(事前設定フィルタ)」のタグ名。この配下の
-# dispTitle等はフィルタ条件自体のキャプションであり、カラムのエイリアス(表示名)
-# ではないため、walk()でのエイリアス抽出対象から除外する。
-SEARCH_CONDITION_TAGS = ("Condition", "SearchCondition", "PreCondition", "Expression")
+# 物理カラム名と無関係な複数のフィールド参照が同一要素の属性として同居するため、
+# walk()の汎用ヒューリスティック(同一要素内の他属性をラベル候補として拾う)が
+# 誤動作するタグ名。この配下はエイリアス抽出対象から除外する。
+# - Condition/SearchCondition/PreCondition/Expression: 検索条件(事前設定フィルタ)。
+#   dispTitle等はフィルタ条件自体のキャプションでカラムのエイリアスではない(DD-023)。
+# - ItemOrderChange: 集計表(クロス集計)パーツの軸設定。category(行軸)/series(列軸)/
+#   summary(集計値)という無関係な3つのフィールド参照が同居する(DD-027)。
+NON_ALIAS_CONTEXT_TAGS = ("Condition", "SearchCondition", "PreCondition", "Expression",
+                          "ItemOrderChange")
 
 
 @dataclass
@@ -113,10 +118,10 @@ def _local_tag(tag: str) -> str:
     return tag.rsplit("}", 1)[-1] if "}" in tag else tag
 
 
-def _in_search_condition(stack: List[ET.Element]) -> bool:
-    """stack(現在位置を含む祖先要素列)が検索条件(SEARCH_CONDITION_TAGS)の
-    配下にあるかを判定する(DD-023)。"""
-    return any(_local_tag(el.tag) in SEARCH_CONDITION_TAGS for el in stack)
+def _in_non_alias_context(stack: List[ET.Element]) -> bool:
+    """stack(現在位置を含む祖先要素列)が、カラムのエイリアス(表示名)とは無関係な
+    概念が同居するタグ(NON_ALIAS_CONTEXT_TAGS)の配下にあるかを判定する(DD-023/DD-027)。"""
+    return any(_local_tag(el.tag) in NON_ALIAS_CONTEXT_TAGS for el in stack)
 
 
 _XML_ENCODING_DECL_RE = re.compile(rb'<\?xml[^>]*encoding=["\']([^"\']+)["\']', re.IGNORECASE)
@@ -403,12 +408,12 @@ def auto_parse_xml(source_name: str, content: bytes, index: ColumnIndex,
         if own_text:
             match_sources.append((None, own_text))
 
-        # 検索条件(事前設定フィルタ)配下は、dispTitle等がフィルタ条件自体のキャプション
-        # であってカラムのエイリアスではないため、抽出対象から除外する(DD-023)
-        in_search_condition = _in_search_condition(stack)
+        # NON_ALIAS_CONTEXT_TAGS配下(検索条件のキャプション・集計軸設定等)は、
+        # カラムのエイリアスとは無関係な概念であるため抽出対象から除外する(DD-023/DD-027)
+        in_non_alias_context = _in_non_alias_context(stack)
 
         for attr_key, attr_val in match_sources:
-            extracted = _extract_match(index, attr_val) if not in_search_condition else None
+            extracted = _extract_match(index, attr_val) if not in_non_alias_context else None
             if extracted:
                 col_upper, qualifier = extracted
                 label = find_label_on_element(el, attr_key, attr_val)
@@ -422,7 +427,7 @@ def auto_parse_xml(source_name: str, content: bytes, index: ColumnIndex,
                         item_id=find_ancestor_id(stack),
                         source_file=source_file,
                     ))
-            elif not in_search_condition and (_looks_like_formula_key(attr_key) or _looks_like_formula_value(attr_val)):
+            elif not in_non_alias_context and (_looks_like_formula_key(attr_key) or _looks_like_formula_value(attr_val)):
                 # 完全一致はしないが、計算式らしい値の中に物理カラム名が
                 # 部分文字列として埋め込まれていないか調べる(カスタム項目・事後計算項目対策)
                 cols_in_formula = _find_columns_in_formula(index, attr_val)

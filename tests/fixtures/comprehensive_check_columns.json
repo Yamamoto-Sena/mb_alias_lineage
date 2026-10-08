@@ -1,0 +1,12 @@
+[
+  {"table_name": "T_売上明細", "table_type": "TABLE", "column_name": "URIAGE_KIN", "data_type": "DECIMAL", "ordinal": 1},
+  {"table_name": "T_売上明細", "table_type": "TABLE", "column_name": "CHIIKI_KBN", "data_type": "VARCHAR", "ordinal": 2},
+  {"table_name": "T_売上明細", "table_type": "TABLE", "column_name": "NENDO", "data_type": "VARCHAR", "ordinal": 3},
+  {"table_name": "T_売上明細", "table_type": "TABLE", "column_name": "SHIIRE_SU", "data_type": "DECIMAL", "ordinal": 4},
+  {"table_name": "T_売上明細", "table_type": "TABLE", "column_name": "TANKA", "data_type": "DECIMAL", "ordinal": 5},
+  {"table_name": "T_商品M", "table_type": "TABLE", "column_name": "SHOHIN_CODE", "data_type": "VARCHAR", "ordinal": 1},
+  {"table_name": "T_商品M", "table_type": "TABLE", "column_name": "ZAIKO_SU", "data_type": "DECIMAL", "ordinal": 2},
+  {"table_name": "T_出荷実績", "table_type": "TABLE", "column_name": "DENPYO_NO", "data_type": "VARCHAR", "ordinal": 1},
+  {"table_name": "T_出荷実績", "table_type": "TABLE", "column_name": "NOUHIN_DATE", "data_type": "DATE", "ordinal": 2},
+  {"table_name": "T_出荷実績", "table_type": "TABLE", "column_name": "SHUKKA_SU", "data_type": "DECIMAL", "ordinal": 3}
+]

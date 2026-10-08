@@ -1,0 +1,20 @@
+<Board name="中部エリア売上集計">
+  <Item id="chubu-crosstab-001">
+    <Field column="SHIIRE_SU" label="仕入数量" table="T_売上明細"/>
+    <ItemOrderChange category="CHIIKI_KBN" series="NENDO" summary="URIAGE_KIN">
+      <CategoryDisp>
+        <Item label="地区区分" data="CHIIKI_KBN" selected="true" fid="1"></Item>
+      </CategoryDisp>
+      <SeriesDisp>
+        <Item label="年度" data="NENDO" selected="true" fid="2"></Item>
+      </SeriesDisp>
+      <SummaryDisp>
+        <Item label="売上金額" data="URIAGE_KIN" selected="true" fid="3"></Item>
+      </SummaryDisp>
+    </ItemOrderChange>
+  </Item>
+  <Item id="chubu-crosstab-002">
+    <ItemOrderChange category="CHIIKI_KBN" series="NENDO" summary="URIAGE_KIN">
+    </ItemOrderChange>
+  </Item>
+</Board>

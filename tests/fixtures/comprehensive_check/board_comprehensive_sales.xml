@@ -1,0 +1,51 @@
+<Board name="総合テスト売上ダッシュボード">
+  <!-- 想定内#1: 通常のField(エイリアスあり) -->
+  <Item id="item-001">
+    <Field column="SHIIRE_SU" label="仕入数量" table="T_売上明細"/>
+  </Item>
+
+  <!-- 想定内#2: 計算式(カスタム項目)内の物理カラム参照はusage_type=calcで検出 -->
+  <Item id="item-002">
+    <CustomField name="単価換算売上高" formula="[URIAGE_KIN]*[TANKA]"/>
+  </Item>
+
+  <!-- 想定内#3: クロス集計(ItemOrderChange)と通常Fieldが同じアイテムに同居していても、
+       通常Fieldだけが検出され、クロス集計の軸(category/series/summary)は
+       誤ってエイリアス化されないこと(DD-027) -->
+  <Item id="item-003">
+    <Field column="URIAGE_KIN" label="売上金額(集計表併設)" table="T_売上明細"/>
+    <ItemOrderChange category="CHIIKI_KBN" series="NENDO" summary="URIAGE_KIN">
+      <CategoryDisp>
+        <Item label="地区区分" data="CHIIKI_KBN" selected="true" fid="1"></Item>
+      </CategoryDisp>
+      <SeriesDisp>
+        <Item label="年度" data="NENDO" selected="true" fid="2"></Item>
+      </SeriesDisp>
+    </ItemOrderChange>
+  </Item>
+
+  <!-- 想定外#1: クロス集計パーツのみで通常Fieldを持たないアイテムは0件になること -->
+  <Item id="item-004">
+    <ItemOrderChange category="CHIIKI_KBN" series="NENDO" summary="URIAGE_KIN">
+    </ItemOrderChange>
+  </Item>
+
+  <!-- 想定外#2: 検索条件(事前設定フィルタ)のdispTitleはカラムのエイリアスではない(DD-023) -->
+  <Item id="item-005">
+    <Condition><SearchCondition><PreCondition>
+      <Expression enable="true" dsid="0" fid="3" title="TANKA" dispTitle="絞り込みキャプション"
+                  dispType="INPUT" operatorType="EQUAL"/>
+    </PreCondition></SearchCondition></Condition>
+  </Item>
+
+  <!-- 想定外#3: ON/OFFフラグ属性(disp="true")がaliasTitle空のためラベル候補に
+       誤って昇格しないこと(DD-028)。実機同様、Item直下ではなくDsDef配下に置く -->
+  <DsDef name="月次売上明細">
+    <Item id="9" fid="9" title="TANKA" aliasTitle="" type="NUMBER" disp="true" orderNum="9"/>
+  </DsDef>
+
+  <!-- 想定外#4: ラベルの手がかりが全く無い(物理名そのまま使用)場合は抽出されないこと -->
+  <Item id="item-006">
+    <Field column="ZAIKO_SU"/>
+  </Item>
+</Board>

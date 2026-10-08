@@ -1,0 +1,22 @@
+<?xml version="1.0" ?>
+<DataSource name="総合テストデータソース" type="drsum" comId="Dr.Sum"
+            src="Test/T_出荷実績" dispSrc="Dr.Sum/Test/T_出荷実績" srcName="T_出荷実績" version="4.0.1">
+  <Layout>
+    <Field>
+      <!-- 想定外(要注意)#5: aliasTitleが空=物理名をそのまま表示に使っている状態。
+           抽出自体はされるが、表示名が物理名そのままという点でDD-022の
+           「物理名のまま」判定の対象になる -->
+      <Item id="1" fid="1" title="denpyo_no" aliasTitle="" type="VARCHAR" disp="true"/>
+      <Item id="2" fid="2" title="nouhin_date" aliasTitle="" type="DATE" disp="true"/>
+      <!-- 想定内#4: aliasTitleが設定されていれば、それがそのままエイリアスとして使われる -->
+      <Item id="3" fid="3" title="shukka_su" aliasTitle="出荷数量" type="NUMBER" disp="true"/>
+    </Field>
+    <ExField>
+      <!-- 想定内#5: 計算項目(ExField)はtargetItemFidで元カラム(fid=2 → nouhin_date)を
+           解決してusage_type=calcとして検出される -->
+      <Item id="1" fid="10000" title="納品年月" aliasTitle="" type="VARCHAR" exType="DATE_GROUPING" disp="false">
+        <DateGroups dateType="DATE" targetItemFid="2" format="yyyy/MM"/>
+      </Item>
+    </ExField>
+  </Layout>
+</DataSource>

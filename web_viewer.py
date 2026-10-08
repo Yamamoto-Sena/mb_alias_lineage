@@ -372,8 +372,8 @@ INDEX_HTML = """<!DOCTYPE html>
         <th style="width:22%">テーブル/ビュー</th>
         <th style="width:22%">物理カラム名</th>
         <th style="width:34%">表示名</th>
-        <th style="width:12%">種別</th>
-        <th style="width:10%">アイテムID</th>
+        <th style="width:12%" title="「エイリアス」=表示名がMotionBoard上で設定されている／「物理名そのまま」=表示名が設定されず物理カラム名がそのまま使われている／「計算式」=カスタム項目・事後計算項目の計算式の中でこの物理カラムが参照されている">種別</th>
+        <th style="width:10%" title="ボード定義ファイル内でこの項目を識別する内部ID(デバッグ・問い合わせ用の補助情報です。画面上のパーツ番号ではありません)">アイテムID</th>
       </tr>
     </thead>
     <tbody id="drilldown-tbody"></tbody>
@@ -1341,6 +1341,19 @@ document.getElementById('board-select').addEventListener('change', () => {
   renderDrilldown(selectedBoardName);
 });
 
+// ドリルダウンの「種別」バッジを組み立てる。usage_type='alias'でも、表示名が物理カラム名と
+// 同じ(MotionBoard上でエイリアス未設定)なら「使用ボード」欄の判定(DD-022)と揃え、
+// 本当にエイリアスが命名された行と区別できるよう「物理名そのまま」で表示する(DD-032)
+function drilldownUsageBadge(d) {
+  if (d.usage_type === 'calc') {
+    return '<span class="badge calc">計算式</span>';
+  }
+  if (normalizeText(d.display_name) === normalizeText(d.column_name)) {
+    return '<span class="badge unaliased" title="表示名が設定されず、物理カラム名がそのまま使われています">物理名そのまま</span>';
+  }
+  return '<span class="badge">エイリアス</span>';
+}
+
 function renderDrilldown(boardName) {
   const hint = document.getElementById('drilldown-hint');
   const table = document.getElementById('drilldown-table');
@@ -1364,7 +1377,7 @@ function renderDrilldown(boardName) {
       <td>${escapeHtml(d.table_name)}</td>
       <td><code>${escapeHtml(d.column_name)}</code></td>
       <td>${escapeHtml(d.display_name)}</td>
-      <td><span class="badge ${d.usage_type === 'calc' ? 'calc' : ''}">${d.usage_type === 'calc' ? '計算式' : 'エイリアス'}</span></td>
+      <td>${drilldownUsageBadge(d)}</td>
       <td>${escapeHtml(d.item_id || '')}</td>
     </tr>
   `).join('');

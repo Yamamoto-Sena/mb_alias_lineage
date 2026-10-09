@@ -20,6 +20,10 @@ _tmp_*
 # リポジトリにはコミットしない(ルート直下のみ対象)
 /real_columns.json
 
+# DD-034調査用(dr_sum_metadata.py --dump-raw)の実機カタログ生データ。
+# テーブル名・カラム名等の環境固有情報を含むためコミットしない(ルート直下のみ対象)
+/dr_sum_catalog_raw.json
+
 # レビュー共有用に export_static.py で書き出す一時HTML(用途ごとに使い捨て)
 /for_review_check.html
 

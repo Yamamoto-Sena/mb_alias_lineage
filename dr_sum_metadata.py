@@ -29,6 +29,16 @@ class ColumnMeta:
     column_name: str
     data_type: str
     ordinal: int
+    # DD-034: __all_tables__(assortment='column')に実在すると実機確認済みの4列。
+    # column_size=column_precision、decimal_digits=column_scale、
+    # is_unique="YES"/"NO"(column_unique: 1/0)、is_nullable="YES"/"NO"
+    # (column_null: 0=NULL許容→YES、1=NOT NULL制約あり→NO。実機データでPK的な列が
+    # column_null=1かつcolumn_unique=1だったことから、column_nullは「NOT NULL制約の
+    # 有無」を表すとユーザー確認済み。D-004参照)
+    column_size: int = None
+    decimal_digits: int = None
+    is_nullable: str = None
+    is_unique: str = None
 
 
 class DrSumConnector:
@@ -95,8 +105,10 @@ class DrSumConnector:
 
         # assortment='table'は各テーブル自体の見出し行(column_name等はNULL)であり、
         # 実際のカラム詳細はassortment='column'側に格納されている(実機確認で判明)。
+        # column_precision/column_scale/column_null/column_uniqueはDD-034で実機確認済み。
         query = """
-            SELECT table_name, column_name, column_type
+            SELECT table_name, column_name, column_type,
+                   column_precision, column_scale, column_null, column_unique
             FROM __all_tables__
             WHERE assortment = 'column'
         """
@@ -114,7 +126,7 @@ class DrSumConnector:
 
         ordinal_by_table: Dict[str, int] = {}
         columns = []
-        for table_name, column_name, column_type in rows:
+        for table_name, column_name, column_type, column_precision, column_scale, column_null, column_unique in rows:
             ordinal = ordinal_by_table.get(table_name, 0) + 1
             ordinal_by_table[table_name] = ordinal
             columns.append(ColumnMeta(
@@ -123,8 +135,45 @@ class DrSumConnector:
                 column_name=column_name,
                 data_type=column_type,
                 ordinal=ordinal,
+                column_size=column_precision,
+                decimal_digits=column_scale,
+                is_nullable=("NO" if column_null else "YES") if column_null is not None else None,
+                is_unique=("YES" if column_unique else "NO") if column_unique is not None else None,
             ))
         return columns
+
+    def dump_raw_columns(self, limit: int = 50) -> dict:
+        """DD-034調査用: `__all_tables__`(assortment='column')の全列をそのまま取得する。
+
+        精度・スケール・NULL許可・ユニークに相当する列が存在するかを実機で確認するための
+        使い捨て調査モード(`--dump-raw`)専用。`fetch_columns()`と違い列を絞らず`SELECT *`する。
+        Dr.SumのSQL方言でLIMIT構文が使えるか未確認のため、絞り込みはPython側(fetchall後)で行う。
+        """
+        assert self._conn is not None, "先にconnect()を呼んでください"
+        cursor = self._conn.cursor()
+        query = """
+            SELECT *
+            FROM __all_tables__
+            WHERE assortment = 'column'
+        """
+        try:
+            cursor.execute(query)
+            rows = cursor.fetchall()
+            column_names = [d[0] for d in cursor.description] if cursor.description else []
+        except Exception as e:
+            raise DrSumConnectionError(
+                "システムカタログ(__all_tables__)の全列取得クエリに失敗しました。\n"
+                "  → 実機のDr.Sumバージョンでシステムテーブル構成が異なる可能性があります。\n"
+                f"  元のエラー: {e}"
+            ) from e
+        finally:
+            cursor.close()
+
+        return {
+            "columns": column_names,
+            "total_rows": len(rows),
+            "rows": [list(row) for row in rows[:limit]],
+        }
 
 
 def fetch_columns_stub() -> List[ColumnMeta]:
@@ -156,7 +205,41 @@ def main() -> None:
                          help="実接続せずダミーデータで動作確認する")
     parser.add_argument("--debug", action="store_true",
                          help="接続失敗時に元の例外のスタックトレースも表示する")
+    parser.add_argument("--dump-raw", action="store_true",
+                         help="DD-034調査用: __all_tables__(assortment='column')の全列をそのまま出力する"
+                              "(精度・スケール・NULL許可・ユニークに相当する列の有無を確認するため。"
+                              "通常のカラム取得は行わない)")
+    parser.add_argument("--dump-raw-limit", type=int, default=50,
+                         help="--dump-raw時に出力する最大行数(既定50)")
+    parser.add_argument("--raw-out", default="dr_sum_catalog_raw.json",
+                         help="--dump-raw時の出力先")
     args = parser.parse_args()
+
+    if args.dump_raw:
+        if not (args.host and args.db and args.user and args.jdbc_jar):
+            parser.error("--dump-raw を使う場合も --host --db --user --jdbc-jar が必須です")
+        connector = DrSumConnector(
+            host=args.host, database=args.db, user=args.user,
+            password=args.password, jdbc_jar=args.jdbc_jar, port=args.port,
+        )
+        try:
+            connector.connect()
+            raw = connector.dump_raw_columns(limit=args.dump_raw_limit)
+        except DrSumConnectionError as e:
+            print(f"エラー: {e}", file=sys.stderr)
+            if args.debug:
+                raise
+            sys.exit(1)
+
+        raw_out_path = Path(args.raw_out)
+        raw_out_path.write_text(
+            json.dumps(raw, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        print(f"__all_tables__(assortment='column')の列名: {raw['columns']}")
+        print(f"全{raw['total_rows']}行中、先頭{len(raw['rows'])}行を{raw_out_path}に出力しました")
+        print("精度・スケール・NULL許可・ユニークに相当する列が無いか、上記の列名一覧・出力JSONを確認してください(DD-034)。")
+        return
 
     if args.stub:
         columns = fetch_columns_stub()

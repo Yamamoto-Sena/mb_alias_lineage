@@ -44,9 +44,9 @@
 
 - **日付**: 2026-09-30
 - **背景**: `dr_sum_metadata.py`は当初プレースホルダ実装で、実際の接続仕様が未確定だった。
-- **決定**: ドライバクラスは`jp.co.dw_sapporo.JDBC.JDBCDriver`、接続URLは`jdbc:dwods:<host>:<port>:<database>`、カラム一覧は`__all_tables__`を`assortment='column'`で絞り込んで取得する（`'table'`はテーブル自体の見出し行でカラム詳細を持たない。`doc/engineering-patterns.md` 6参照）。
+- **決定**: ドライバクラスは`jp.co.dw_sapporo.JDBC.JDBCDriver`、接続URLは`jdbc:dwods:<host>:<port>:<database>`、カラム一覧は`__all_tables__`を`assortment='column'`で絞り込んで取得する（`'table'`はテーブル自体の見出し行でカラム詳細を持たない。`doc/engineering-patterns.md` 6参照）。精度・スケール・NULL許可・ユニークは、DD-034でユーザーが実機に対して`__all_tables__`の全列(`SELECT *`)を取得した結果、`column_precision`/`column_scale`/`column_null`/`column_unique`という列がそのまま存在することを確認済み（`dr_sum_metadata.py`の`fetch_columns()`に追加）。`column_null`は列名から素直に読むと逆の意味に見えるが、実機データで主キー的な列が`column_null=1`かつ`column_unique=1`だったことから「1=NOT NULL制約あり、0=NULL許容」とユーザー確認済み。
 - **帰結**: ディストリビューター・マルチビューの区別は対応表未確認のためスコープ外のまま（既知の制約）。`column_type`数値コードの型名変換は、DD-024でユーザーが実機から取得した25カラムのデータにより`0`=VARCHAR・`3`=DATE・`7`=NUMERICの3種類のみ確認済み（`web_viewer.py`の`DR_SUM_TYPE_CODE_MAP`に反映）。TIME/TIMESTAMP/INTERVAL/OBJECT等その他の値は引き続き未確認で、数値のまま「内部コード」注記表示（誤変換リスクを避けるため、確認できた値のみ変換する方針）。
-- **元DD**: DD-002-2, DD-024
+- **元DD**: DD-002-2, DD-024, DD-033, DD-034
 
 ## D-005: 本ツールは認証なし・localhost限定・外部非公開を既定の運用設計とする
 

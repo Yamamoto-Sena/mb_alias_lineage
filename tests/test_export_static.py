@@ -7,7 +7,7 @@ def _make_db(tmp_path):
     db_path = tmp_path / "lineage.db"
     conn = sqlite3.connect(db_path)
     conn.executescript("""
-        CREATE TABLE columns (id INTEGER PRIMARY KEY, table_name TEXT, table_type TEXT, column_name TEXT, data_type TEXT);
+        CREATE TABLE columns (id INTEGER PRIMARY KEY, table_name TEXT, table_type TEXT, column_name TEXT, data_type TEXT, column_size INTEGER, decimal_digits INTEGER, is_nullable TEXT, is_unique TEXT);
         CREATE TABLE aliases (id INTEGER PRIMARY KEY, column_id INTEGER, display_name TEXT, board_name TEXT, item_id TEXT, usage_type TEXT DEFAULT 'alias');
     """)
     conn.execute(
@@ -39,7 +39,7 @@ def test_build_static_html_escapes_script_close_tag_in_display_name(tmp_path):
     db_path = tmp_path / "lineage.db"
     conn = sqlite3.connect(db_path)
     conn.executescript("""
-        CREATE TABLE columns (id INTEGER PRIMARY KEY, table_name TEXT, table_type TEXT, column_name TEXT, data_type TEXT);
+        CREATE TABLE columns (id INTEGER PRIMARY KEY, table_name TEXT, table_type TEXT, column_name TEXT, data_type TEXT, column_size INTEGER, decimal_digits INTEGER, is_nullable TEXT, is_unique TEXT);
         CREATE TABLE aliases (id INTEGER PRIMARY KEY, column_id INTEGER, display_name TEXT, board_name TEXT, item_id TEXT, usage_type TEXT DEFAULT 'alias');
     """)
     conn.execute(

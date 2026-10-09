@@ -211,6 +211,10 @@ INDEX_HTML = """<!DOCTYPE html>
   .def-table tr.highlight td { background: var(--highlight-bg); font-weight: 600; }
   /* DD-021論点3: データ型が数値コードの場合、Dr.Sum内部コードであることを示す注記 */
   .type-code-note { color: var(--text-sub); font-size: 11px; margin-left: 4px; cursor: help; border-bottom: 1px dotted var(--text-sub); }
+  /* DD-033: 既定は「物理カラム名」「データ型」のみ表示し、「すべて表示」展開時だけ精度・スケール・NULL許可・ユニーク列を出す */
+  .def-table .def-detail-col { display: none; }
+  #table-def-panel.show-detail .def-table .def-detail-col { display: table-cell; }
+  .def-table-toggle { font-size: 11px; border: 1px solid var(--border); background: var(--surface); border-radius: 4px; padding: 2px 8px; cursor: pointer; margin-bottom: 8px; }
 
   /* 論点3(DD-020): 使用ボード列 = ボード名｜表示名、以降の表示名は下に重ねる */
   /* DD-021論点1: セル全体をグリッド化し、ボード名列の幅を揃えて区切り線・表示名の開始位置を揃える */
@@ -403,8 +407,15 @@ INDEX_HTML = """<!DOCTYPE html>
   <button class="close-btn" id="table-def-close" type="button" title="閉じる">×</button>
   <h3 id="table-def-title">テーブル定義</h3>
   <p class="panel-sub" id="table-def-sub"></p>
+  <button class="def-table-toggle" id="table-def-detail-toggle" type="button">すべて表示</button>
   <table class="def-table">
-    <thead><tr><th>物理カラム名</th><th>データ型</th></tr></thead>
+    <thead><tr>
+      <th>物理カラム名</th><th>データ型</th>
+      <th class="def-detail-col" title="精度・桁数(例: VARCHARの最大長、NUMERICの全体桁数)">精度</th>
+      <th class="def-detail-col" title="小数点以下の桁数(NUMERIC等のみ)">スケール</th>
+      <th class="def-detail-col">NULL</th>
+      <th class="def-detail-col">ユニーク</th>
+    </tr></thead>
     <tbody id="table-def-tbody"></tbody>
   </table>
 </div>
@@ -508,7 +519,8 @@ function jsFetchData(db, whitelistSet) {
            COUNT(DISTINCT CASE WHEN a.usage_type='alias' THEN a.display_name END) AS alias_count,
            COUNT(a.id) AS usage_count,
            GROUP_CONCAT(DISTINCT a.board_name) AS boards,
-           c.table_type
+           c.table_type,
+           c.column_size, c.decimal_digits, c.is_nullable, c.is_unique
     FROM columns c
     LEFT JOIN aliases a ON a.column_id = c.id
     GROUP BY c.id
@@ -516,7 +528,8 @@ function jsFetchData(db, whitelistSet) {
   `);
   if (!res.length) return [];
   return res[0].values.map(row => {
-    const [id, table_name, column_name, data_type, displayNamesRaw, calcNamesRaw, aliasCount, usageCount, boardsRaw, tableType] = row;
+    const [id, table_name, column_name, data_type, displayNamesRaw, calcNamesRaw, aliasCount, usageCount, boardsRaw, tableType,
+           columnSize, decimalDigits, isNullable, isUnique] = row;
     const display_names = displayNamesRaw ? displayNamesRaw.split(",") : [];
     const isWhitelisted = whitelistSet.has(normalizeKey(table_name, column_name));
     return {
@@ -531,6 +544,8 @@ function jsFetchData(db, whitelistSet) {
       // DD-025: match_aliases.pyが接続中DBの物理カラムと一致しないエイリアスを
       // table_type='(不明)'で仮登録したもの(別DBのボード混入やカラム名変更等の兆候)
       is_unmatched: tableType === "(不明)",
+      // DD-033: テーブル定義パネルの「すべて表示」展開時に使う(未取得ならnull=フロント側で「-」表示)
+      column_size: columnSize, decimal_digits: decimalDigits, is_nullable: isNullable, is_unique: isUnique,
     };
   });
 }
@@ -1104,17 +1119,43 @@ function formatDataType(dataType) {
   return `${escapeHtml(text)}<span class="type-code-note" title="Dr.Sum内部の数値コードです。型名への変換は未対応のため、実際のデータ型はDr.Sum管理画面でご確認ください">(内部コード)</span>`;
 }
 
+// DD-033: 精度・スケール・NULL許可・ユニークは未取得(null/undefined)の場合「-」と表示する
+// (実機Dr.Sumで値が取れない場合も同じ表示になる。doc/decisions.md D-004参照)
+function formatDefDetail(value) {
+  return (value === null || value === undefined || value === '') ? '-' : escapeHtml(String(value));
+}
+
+function formatNullable(isNullable) {
+  if (isNullable === 'YES') return 'NULL可';
+  if (isNullable === 'NO') return 'NOT NULL';
+  return '-';
+}
+
+function formatUnique(isUnique) {
+  if (isUnique === 'YES') return '○';
+  if (isUnique === 'NO') return '-';
+  return '-';
+}
+
 // 論点1(DD-020): 物理カラム名クリック→テーブル定義サイドパネル(横の空きスペース、無ければ一覧下にインライン表示)
 function openTableDefPanel(table, column) {
   const defs = allRows
     .filter(r => r.table_name === table)
-    .map(r => ({ column_name: r.column_name, data_type: r.data_type }))
+    .map(r => ({
+      column_name: r.column_name, data_type: r.data_type,
+      column_size: r.column_size, decimal_digits: r.decimal_digits,
+      is_nullable: r.is_nullable, is_unique: r.is_unique,
+    }))
     .sort((a, b) => a.column_name.localeCompare(b.column_name));
   document.getElementById('table-def-title').textContent = `テーブル定義: ${table}`;
   document.getElementById('table-def-sub').textContent = `${defs.length}カラム中、クリックしたカラムを強調表示`;
   document.getElementById('table-def-tbody').innerHTML = defs.map(c => {
     const hl = c.column_name === column ? ' class="highlight"' : '';
-    return `<tr${hl}><td><code>${escapeHtml(c.column_name)}</code></td><td>${formatDataType(c.data_type)}</td></tr>`;
+    return `<tr${hl}><td><code>${escapeHtml(c.column_name)}</code></td><td>${formatDataType(c.data_type)}</td>` +
+      `<td class="def-detail-col">${formatDefDetail(c.column_size)}</td>` +
+      `<td class="def-detail-col">${formatDefDetail(c.decimal_digits)}</td>` +
+      `<td class="def-detail-col">${formatNullable(c.is_nullable)}</td>` +
+      `<td class="def-detail-col">${formatUnique(c.is_unique)}</td></tr>`;
   }).join('');
   document.querySelectorAll('.col-link').forEach(el => el.classList.remove('active'));
   document.querySelectorAll(`.col-link[data-table="${CSS.escape(table)}"][data-column="${CSS.escape(column)}"]`)
@@ -1127,6 +1168,13 @@ function closeTableDefPanel() {
   document.getElementById('table-def-panel').classList.remove('open');
   document.querySelectorAll('.col-link').forEach(el => el.classList.remove('active'));
 }
+
+// DD-033: 既定は「物理カラム名」「データ型」のみ表示し、ボタンで精度・スケール・NULL許可・ユニーク列を展開する
+document.getElementById('table-def-detail-toggle').addEventListener('click', (e) => {
+  const panel = document.getElementById('table-def-panel');
+  const expanded = panel.classList.toggle('show-detail');
+  e.target.textContent = expanded ? '折りたたむ' : 'すべて表示';
+});
 
 // 画面右に十分な空きスペースがあればそこに固定表示し、無ければ一覧の下にインライン表示する
 function positionTableDefPanel() {
@@ -1616,7 +1664,8 @@ def fetch_data(db_path: str, whitelist: set = None):
                COUNT(DISTINCT CASE WHEN a.usage_type='alias' THEN a.display_name END) AS alias_count,
                COUNT(a.id) AS usage_count,
                GROUP_CONCAT(DISTINCT a.board_name) AS boards,
-               c.table_type
+               c.table_type,
+               c.column_size, c.decimal_digits, c.is_nullable, c.is_unique
         FROM columns c
         LEFT JOIN aliases a ON a.column_id = c.id
         GROUP BY c.id
@@ -1652,6 +1701,11 @@ def fetch_data(db_path: str, whitelist: set = None):
             # DD-025: match_aliases.pyが接続中DBの物理カラムと一致しないエイリアスを
             # table_type='(不明)'で仮登録したもの(別DBのボード混入やカラム名変更等の兆候)
             "is_unmatched": row[9] == "(不明)",
+            # DD-033: テーブル定義パネルの「すべて表示」展開時に使う(未取得ならNULL=フロント側で「-」表示)
+            "column_size": row[10],
+            "decimal_digits": row[11],
+            "is_nullable": row[12],
+            "is_unique": row[13],
         })
     return result
 

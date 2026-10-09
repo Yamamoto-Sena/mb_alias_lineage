@@ -20,6 +20,36 @@ def test_build_db_matches_known_column(tmp_path):
     assert rows == [("T_A", "COL1")]
 
 
+def test_build_db_stores_column_size_decimal_digits_nullable_unique(tmp_path):
+    # DD-033: 精度・スケール・NULL許可・ユニークをcolumnsテーブルに保存する
+    db_path = tmp_path / "lineage.db"
+    columns = [
+        {"table_name": "T_A", "table_type": "TABLE", "column_name": "COL1", "data_type": "NUMERIC",
+         "column_size": 10, "decimal_digits": 2, "is_nullable": "NO", "is_unique": "YES"},
+    ]
+    ma.build_db(str(db_path), columns, [])
+
+    conn = sqlite3.connect(db_path)
+    row = conn.execute(
+        "SELECT column_size, decimal_digits, is_nullable, is_unique FROM columns WHERE table_name='T_A'"
+    ).fetchone()
+    conn.close()
+    assert row == (10, 2, "NO", "YES")
+
+
+def test_build_db_defaults_column_size_decimal_digits_nullable_unique_to_null(tmp_path):
+    # DD-033: 未指定の場合はNULLのまま保存される(実機で取得できない場合の挙動と同じ)
+    db_path = tmp_path / "lineage.db"
+    ma.build_db(str(db_path), COLUMNS, [])
+
+    conn = sqlite3.connect(db_path)
+    row = conn.execute(
+        "SELECT column_size, decimal_digits, is_nullable, is_unique FROM columns WHERE table_name='T_A'"
+    ).fetchone()
+    conn.close()
+    assert row == (None, None, None, None)
+
+
 def test_build_db_unmatched_alias_falls_back_to_fumei(tmp_path, capsys):
     db_path = tmp_path / "lineage.db"
     aliases = [

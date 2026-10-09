@@ -15,6 +15,12 @@ CREATE TABLE columns (
     table_type TEXT,
     column_name TEXT NOT NULL,
     data_type TEXT,
+    -- DD-033: 以下4列はすべてNULL許容。実機Dr.Sumカタログでの取得可否は未確認のため
+    -- (doc/decisions.md D-004)、現時点ではデモデータのみ値を持つ
+    column_size INTEGER,   -- 精度・桁数(JDBC DatabaseMetaData.getColumns()のCOLUMN_SIZE相当)
+    decimal_digits INTEGER, -- スケール(同DECIMAL_DIGITS相当)
+    is_nullable TEXT,       -- NULL許可("YES"/"NO"。同IS_NULLABLE相当)
+    is_unique TEXT,         -- ユニーク("YES"/"NO"。JDBC標準に対応列が無い独自項目)
     UNIQUE(table_name, column_name)
 );
 

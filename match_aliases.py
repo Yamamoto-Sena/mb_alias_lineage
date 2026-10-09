@@ -106,10 +106,13 @@ def build_db(db_path: str, columns: list, aliases: list, connected_db: str = Non
     for col in columns:
         cur.execute(
             """
-            INSERT OR IGNORE INTO columns (table_name, table_type, column_name, data_type)
-            VALUES (?, ?, ?, ?)
+            INSERT OR IGNORE INTO columns
+                (table_name, table_type, column_name, data_type,
+                 column_size, decimal_digits, is_nullable, is_unique)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (col["table_name"], col.get("table_type"), col["column_name"], col.get("data_type")),
+            (col["table_name"], col.get("table_type"), col["column_name"], col.get("data_type"),
+             col.get("column_size"), col.get("decimal_digits"), col.get("is_nullable"), col.get("is_unique")),
         )
         cur.execute(
             "SELECT id FROM columns WHERE table_name=? AND column_name=?",

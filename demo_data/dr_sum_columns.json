@@ -4,300 +4,472 @@
     "table_type": "TABLE",
     "column_name": "URIAGE_KIN",
     "data_type": "DECIMAL",
-    "ordinal": 1
+    "ordinal": 1,
+    "column_size": null,
+    "decimal_digits": null,
+    "is_nullable": null,
+    "is_unique": null
   },
   {
     "table_name": "T_売上明細",
     "table_type": "TABLE",
     "column_name": "CHIIKI_KBN",
     "data_type": "VARCHAR",
-    "ordinal": 2
+    "ordinal": 2,
+    "column_size": null,
+    "decimal_digits": null,
+    "is_nullable": null,
+    "is_unique": null
   },
   {
     "table_name": "T_売上明細",
     "table_type": "TABLE",
     "column_name": "URIAGE_DATE",
     "data_type": "DATE",
-    "ordinal": 3
+    "ordinal": 3,
+    "column_size": null,
+    "decimal_digits": null,
+    "is_nullable": null,
+    "is_unique": null
   },
   {
     "table_name": "T_売上明細",
     "table_type": "TABLE",
     "column_name": "SHOHIN_CD",
     "data_type": "VARCHAR",
-    "ordinal": 4
+    "ordinal": 4,
+    "column_size": null,
+    "decimal_digits": null,
+    "is_nullable": null,
+    "is_unique": null
   },
   {
     "table_name": "T_顧客M",
     "table_type": "TABLE",
     "column_name": "KOKYAKU_CD",
     "data_type": "VARCHAR",
-    "ordinal": 1
+    "ordinal": 1,
+    "column_size": null,
+    "decimal_digits": null,
+    "is_nullable": null,
+    "is_unique": null
   },
   {
     "table_name": "T_顧客M",
     "table_type": "TABLE",
     "column_name": "KOKYAKU_NAME",
     "data_type": "VARCHAR",
-    "ordinal": 2
+    "ordinal": 2,
+    "column_size": null,
+    "decimal_digits": null,
+    "is_nullable": null,
+    "is_unique": null
   },
   {
     "table_name": "T_顧客M",
     "table_type": "TABLE",
     "column_name": "GYOSHU_CD",
     "data_type": "VARCHAR",
-    "ordinal": 3
+    "ordinal": 3,
+    "column_size": null,
+    "decimal_digits": null,
+    "is_nullable": null,
+    "is_unique": null
   },
   {
     "table_name": "T_在庫",
     "table_type": "TABLE",
     "column_name": "ZAIKO_SU",
     "data_type": "INTEGER",
-    "ordinal": 1
+    "ordinal": 1,
+    "column_size": null,
+    "decimal_digits": null,
+    "is_nullable": null,
+    "is_unique": null
   },
   {
     "table_name": "T_在庫",
     "table_type": "TABLE",
     "column_name": "SOKO_CD",
     "data_type": "VARCHAR",
-    "ordinal": 2
+    "ordinal": 2,
+    "column_size": null,
+    "decimal_digits": null,
+    "is_nullable": null,
+    "is_unique": null
   },
   {
     "table_name": "T_商品M",
     "table_type": "TABLE",
     "column_name": "SHOHIN_CD",
     "data_type": "VARCHAR",
-    "ordinal": 1
+    "ordinal": 1,
+    "column_size": null,
+    "decimal_digits": null,
+    "is_nullable": null,
+    "is_unique": null
   },
   {
     "table_name": "T_商品M",
     "table_type": "TABLE",
     "column_name": "SHOHIN_NAME",
     "data_type": "VARCHAR",
-    "ordinal": 2
+    "ordinal": 2,
+    "column_size": null,
+    "decimal_digits": null,
+    "is_nullable": null,
+    "is_unique": null
   },
   {
     "table_name": "T_商品M",
     "table_type": "TABLE",
     "column_name": "TANKA",
     "data_type": "DECIMAL",
-    "ordinal": 3
+    "ordinal": 3,
+    "column_size": null,
+    "decimal_digits": null,
+    "is_nullable": null,
+    "is_unique": null
   },
   {
     "table_name": "V_売上_月次集計",
     "table_type": "VIEW",
     "column_name": "GETSUJI_URIAGE",
     "data_type": "DECIMAL",
-    "ordinal": 1
+    "ordinal": 1,
+    "column_size": null,
+    "decimal_digits": null,
+    "is_nullable": null,
+    "is_unique": null
   },
   {
     "table_name": "T_配送案件",
     "table_type": "TABLE",
     "column_name": "配送案件コード",
     "data_type": "VARCHAR",
-    "ordinal": 1
+    "ordinal": 1,
+    "column_size": 20,
+    "decimal_digits": null,
+    "is_nullable": "NO",
+    "is_unique": "YES"
   },
   {
     "table_name": "T_配送案件",
     "table_type": "TABLE",
     "column_name": "受付日時",
     "data_type": "TIMESTAMP",
-    "ordinal": 2
+    "ordinal": 2,
+    "column_size": null,
+    "decimal_digits": null,
+    "is_nullable": "NO",
+    "is_unique": null
   },
   {
     "table_name": "T_配送案件",
     "table_type": "TABLE",
     "column_name": "出荷予定日",
     "data_type": "DATE",
-    "ordinal": 3
+    "ordinal": 3,
+    "column_size": null,
+    "decimal_digits": null,
+    "is_nullable": "YES",
+    "is_unique": null
   },
   {
     "table_name": "T_配送案件",
     "table_type": "TABLE",
     "column_name": "配送所要時間",
     "data_type": "INTERVAL",
-    "ordinal": 4
+    "ordinal": 4,
+    "column_size": null,
+    "decimal_digits": null,
+    "is_nullable": "YES",
+    "is_unique": null
   },
   {
     "table_name": "T_配送案件",
     "table_type": "TABLE",
     "column_name": "運賃",
     "data_type": "NUMERIC",
-    "ordinal": 5
+    "ordinal": 5,
+    "column_size": 10,
+    "decimal_digits": 2,
+    "is_nullable": "YES",
+    "is_unique": null
   },
   {
     "table_name": "T_設備保守履歴",
     "table_type": "TABLE",
     "column_name": "保守履歴番号",
     "data_type": "VARCHAR",
-    "ordinal": 1
+    "ordinal": 1,
+    "column_size": 20,
+    "decimal_digits": null,
+    "is_nullable": "NO",
+    "is_unique": "YES"
   },
   {
     "table_name": "T_設備保守履歴",
     "table_type": "TABLE",
     "column_name": "点検実施日",
     "data_type": "DATE",
-    "ordinal": 2
+    "ordinal": 2,
+    "column_size": null,
+    "decimal_digits": null,
+    "is_nullable": "NO",
+    "is_unique": null
   },
   {
     "table_name": "T_設備保守履歴",
     "table_type": "TABLE",
     "column_name": "点検開始時刻",
     "data_type": "TIME",
-    "ordinal": 3
+    "ordinal": 3,
+    "column_size": null,
+    "decimal_digits": null,
+    "is_nullable": "YES",
+    "is_unique": null
   },
   {
     "table_name": "T_設備保守履歴",
     "table_type": "TABLE",
     "column_name": "点検所要時間",
     "data_type": "INTERVAL",
-    "ordinal": 4
+    "ordinal": 4,
+    "column_size": null,
+    "decimal_digits": null,
+    "is_nullable": "YES",
+    "is_unique": null
   },
   {
     "table_name": "T_設備保守履歴",
     "table_type": "TABLE",
     "column_name": "温度測定値",
     "data_type": "REAL",
-    "ordinal": 5
+    "ordinal": 5,
+    "column_size": null,
+    "decimal_digits": null,
+    "is_nullable": "YES",
+    "is_unique": null
   },
   {
     "table_name": "T_設備保守履歴",
     "table_type": "TABLE",
     "column_name": "点検報告書添付ファイル",
     "data_type": "OBJECT",
-    "ordinal": 6
+    "ordinal": 6,
+    "column_size": null,
+    "decimal_digits": null,
+    "is_nullable": "YES",
+    "is_unique": null
   },
   {
     "table_name": "T_契約情報",
     "table_type": "TABLE",
     "column_name": "契約番号",
     "data_type": "VARCHAR",
-    "ordinal": 1
+    "ordinal": 1,
+    "column_size": 20,
+    "decimal_digits": null,
+    "is_nullable": "NO",
+    "is_unique": "YES"
   },
   {
     "table_name": "T_契約情報",
     "table_type": "TABLE",
     "column_name": "契約開始日",
     "data_type": "DATE",
-    "ordinal": 2
+    "ordinal": 2,
+    "column_size": null,
+    "decimal_digits": null,
+    "is_nullable": "NO",
+    "is_unique": null
   },
   {
     "table_name": "T_契約情報",
     "table_type": "TABLE",
     "column_name": "契約締結日時",
     "data_type": "TIMESTAMP",
-    "ordinal": 3
+    "ordinal": 3,
+    "column_size": null,
+    "decimal_digits": null,
+    "is_nullable": "YES",
+    "is_unique": null
   },
   {
     "table_name": "T_契約情報",
     "table_type": "TABLE",
     "column_name": "契約更新猶予期間",
     "data_type": "INTERVAL",
-    "ordinal": 4
+    "ordinal": 4,
+    "column_size": null,
+    "decimal_digits": null,
+    "is_nullable": "YES",
+    "is_unique": null
   },
   {
     "table_name": "T_契約情報",
     "table_type": "TABLE",
     "column_name": "契約金額",
     "data_type": "NUMERIC",
-    "ordinal": 5
+    "ordinal": 5,
+    "column_size": 12,
+    "decimal_digits": 2,
+    "is_nullable": "YES",
+    "is_unique": null
   },
   {
     "table_name": "T_契約情報",
     "table_type": "TABLE",
     "column_name": "契約書スキャンファイル",
     "data_type": "OBJECT",
-    "ordinal": 6
+    "ordinal": 6,
+    "column_size": null,
+    "decimal_digits": null,
+    "is_nullable": "YES",
+    "is_unique": null
   },
   {
     "table_name": "T_問い合わせ対応記録",
     "table_type": "TABLE",
     "column_name": "対応履歴番号",
     "data_type": "VARCHAR",
-    "ordinal": 1
+    "ordinal": 1,
+    "column_size": 20,
+    "decimal_digits": null,
+    "is_nullable": "NO",
+    "is_unique": "YES"
   },
   {
     "table_name": "T_問い合わせ対応記録",
     "table_type": "TABLE",
     "column_name": "受付日時",
     "data_type": "TIMESTAMP",
-    "ordinal": 2
+    "ordinal": 2,
+    "column_size": null,
+    "decimal_digits": null,
+    "is_nullable": "NO",
+    "is_unique": null
   },
   {
     "table_name": "T_問い合わせ対応記録",
     "table_type": "TABLE",
     "column_name": "対応開始時刻",
     "data_type": "TIME",
-    "ordinal": 3
+    "ordinal": 3,
+    "column_size": null,
+    "decimal_digits": null,
+    "is_nullable": "YES",
+    "is_unique": null
   },
   {
     "table_name": "T_問い合わせ対応記録",
     "table_type": "TABLE",
     "column_name": "対応所要時間",
     "data_type": "INTERVAL",
-    "ordinal": 4
+    "ordinal": 4,
+    "column_size": null,
+    "decimal_digits": null,
+    "is_nullable": "YES",
+    "is_unique": null
   },
   {
     "table_name": "T_問い合わせ対応記録",
     "table_type": "TABLE",
     "column_name": "満足度評価スコア",
     "data_type": "REAL",
-    "ordinal": 5
+    "ordinal": 5,
+    "column_size": null,
+    "decimal_digits": null,
+    "is_nullable": "YES",
+    "is_unique": null
   },
   {
     "table_name": "T_問い合わせ対応記録",
     "table_type": "TABLE",
     "column_name": "対応記録添付ファイル",
     "data_type": "OBJECT",
-    "ordinal": 6
+    "ordinal": 6,
+    "column_size": null,
+    "decimal_digits": null,
+    "is_nullable": "YES",
+    "is_unique": null
   },
   {
     "table_name": "T_勤怠記録",
     "table_type": "TABLE",
     "column_name": "勤怠記録番号",
     "data_type": "VARCHAR",
-    "ordinal": 1
+    "ordinal": 1,
+    "column_size": 20,
+    "decimal_digits": null,
+    "is_nullable": "NO",
+    "is_unique": "YES"
   },
   {
     "table_name": "T_勤怠記録",
     "table_type": "TABLE",
     "column_name": "勤務日",
     "data_type": "DATE",
-    "ordinal": 2
+    "ordinal": 2,
+    "column_size": null,
+    "decimal_digits": null,
+    "is_nullable": "NO",
+    "is_unique": null
   },
   {
     "table_name": "T_勤怠記録",
     "table_type": "TABLE",
     "column_name": "出勤時刻",
     "data_type": "TIME",
-    "ordinal": 3
+    "ordinal": 3,
+    "column_size": null,
+    "decimal_digits": null,
+    "is_nullable": "YES",
+    "is_unique": null
   },
   {
     "table_name": "T_勤怠記録",
     "table_type": "TABLE",
     "column_name": "退勤時刻",
     "data_type": "TIME",
-    "ordinal": 4
+    "ordinal": 4,
+    "column_size": null,
+    "decimal_digits": null,
+    "is_nullable": "YES",
+    "is_unique": null
   },
   {
     "table_name": "T_勤怠記録",
     "table_type": "TABLE",
     "column_name": "休憩時間",
     "data_type": "INTERVAL",
-    "ordinal": 5
+    "ordinal": 5,
+    "column_size": null,
+    "decimal_digits": null,
+    "is_nullable": "YES",
+    "is_unique": null
   },
   {
     "table_name": "T_勤怠記録",
     "table_type": "TABLE",
     "column_name": "残業手当",
     "data_type": "NUMERIC",
-    "ordinal": 6
+    "ordinal": 6,
+    "column_size": 10,
+    "decimal_digits": 2,
+    "is_nullable": "YES",
+    "is_unique": null
   },
   {
     "table_name": "T_勤怠記録",
     "table_type": "TABLE",
     "column_name": "体温測定値",
     "data_type": "REAL",
-    "ordinal": 7
+    "ordinal": 7,
+    "column_size": null,
+    "decimal_digits": null,
+    "is_nullable": "YES",
+    "is_unique": null
   }
 ]

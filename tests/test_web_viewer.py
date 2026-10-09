@@ -9,7 +9,8 @@ def _make_db(tmp_path, rows, calc_aliases=None):
     db_path = tmp_path / "lineage.db"
     conn = sqlite3.connect(db_path)
     conn.executescript("""
-        CREATE TABLE columns (id INTEGER PRIMARY KEY, table_name TEXT, table_type TEXT, column_name TEXT, data_type TEXT);
+        CREATE TABLE columns (id INTEGER PRIMARY KEY, table_name TEXT, table_type TEXT, column_name TEXT, data_type TEXT,
+            column_size INTEGER, decimal_digits INTEGER, is_nullable TEXT, is_unique TEXT);
         CREATE TABLE aliases (id INTEGER PRIMARY KEY, column_id INTEGER, display_name TEXT, board_name TEXT, item_id TEXT, usage_type TEXT DEFAULT 'alias');
     """)
     for col_id, table_name, column_name, aliases in rows:
@@ -50,6 +51,35 @@ def test_fetch_data_includes_data_type(tmp_path):
     db_path = _make_db(tmp_path, [(1, "T_A", "COL1", [("表示A", "board1")])])
     result = wv.fetch_data(db_path)
     assert result[0]["data_type"] == "VARCHAR"
+
+
+def test_fetch_data_includes_precision_scale_nullable_unique(tmp_path):
+    # DD-033: テーブル定義パネルの「すべて表示」展開列に使う
+    db_path = _make_db(tmp_path, [(1, "T_A", "COL1", [("表示A", "board1")])])
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "UPDATE columns SET column_size=10, decimal_digits=2, is_nullable='NO', is_unique='YES' WHERE id=1"
+    )
+    conn.commit()
+    conn.close()
+
+    result = wv.fetch_data(db_path)
+    row = result[0]
+    assert row["column_size"] == 10
+    assert row["decimal_digits"] == 2
+    assert row["is_nullable"] == "NO"
+    assert row["is_unique"] == "YES"
+
+
+def test_fetch_data_defaults_precision_scale_nullable_unique_to_none(tmp_path):
+    # DD-033: 未取得(実機で未対応等)の場合はNoneのまま返す(フロント側で「-」表示になる)
+    db_path = _make_db(tmp_path, [(1, "T_A", "COL1", [("表示A", "board1")])])
+    result = wv.fetch_data(db_path)
+    row = result[0]
+    assert row["column_size"] is None
+    assert row["decimal_digits"] is None
+    assert row["is_nullable"] is None
+    assert row["is_unique"] is None
 
 
 def test_fetch_data_naming_variants(tmp_path):
@@ -131,7 +161,8 @@ def test_fetch_data_flags_unmatched_when_table_type_is_fumei(tmp_path):
     db_path = tmp_path / "lineage.db"
     conn = sqlite3.connect(db_path)
     conn.executescript("""
-        CREATE TABLE columns (id INTEGER PRIMARY KEY, table_name TEXT, table_type TEXT, column_name TEXT, data_type TEXT);
+        CREATE TABLE columns (id INTEGER PRIMARY KEY, table_name TEXT, table_type TEXT, column_name TEXT, data_type TEXT,
+            column_size INTEGER, decimal_digits INTEGER, is_nullable TEXT, is_unique TEXT);
         CREATE TABLE aliases (id INTEGER PRIMARY KEY, column_id INTEGER, display_name TEXT, board_name TEXT, item_id TEXT, usage_type TEXT DEFAULT 'alias');
     """)
     conn.execute(

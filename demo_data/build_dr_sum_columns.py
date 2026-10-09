@@ -58,46 +58,51 @@ SCHEMA = [
 # 偏りなくカバーするための追加スキーマ。詳細はdemo_data/dr_sum_type_schema/テーブル定義.md参照。
 # 既存SCHEMAとテーブル名・カラム名の重複が無いことを確認済み。MotionBoard側のエイリアス定義は
 # 無いため、これらの物理カラムはビューア上で「未使用」として表示される(型表示の確認が目的のため)
+#
+# DD-033: 各列は (column_name, data_type, column_size, decimal_digits, is_nullable, is_unique)。
+# 精度・スケール・NULL可否は同フォルダのテーブル定義.mdの記載を転記。is_unique="YES"は
+# README記載の「各コード列(配送案件コード等)は5,000行すべてでユニーク」を確認済みの列のみ
+# (それ以外は未確認のためNoneのまま=テーブル定義パネルでは「-」表示になる)
 SCHEMA_TYPE_COVERAGE = [
     ("T_配送案件", "TABLE", [
-        ("配送案件コード", "VARCHAR"),
-        ("受付日時", "TIMESTAMP"),
-        ("出荷予定日", "DATE"),
-        ("配送所要時間", "INTERVAL"),
-        ("運賃", "NUMERIC"),
+        ("配送案件コード", "VARCHAR", 20, None, "NO", "YES"),
+        ("受付日時", "TIMESTAMP", None, None, "NO", None),
+        ("出荷予定日", "DATE", None, None, "YES", None),
+        ("配送所要時間", "INTERVAL", None, None, "YES", None),
+        ("運賃", "NUMERIC", 10, 2, "YES", None),
     ]),
     ("T_設備保守履歴", "TABLE", [
-        ("保守履歴番号", "VARCHAR"),
-        ("点検実施日", "DATE"),
-        ("点検開始時刻", "TIME"),
-        ("点検所要時間", "INTERVAL"),
-        ("温度測定値", "REAL"),
-        ("点検報告書添付ファイル", "OBJECT"),
+        ("保守履歴番号", "VARCHAR", 20, None, "NO", "YES"),
+        ("点検実施日", "DATE", None, None, "NO", None),
+        ("点検開始時刻", "TIME", None, None, "YES", None),
+        ("点検所要時間", "INTERVAL", None, None, "YES", None),
+        ("温度測定値", "REAL", None, None, "YES", None),
+        ("点検報告書添付ファイル", "OBJECT", None, None, "YES", None),
     ]),
     ("T_契約情報", "TABLE", [
-        ("契約番号", "VARCHAR"),
-        ("契約開始日", "DATE"),
-        ("契約締結日時", "TIMESTAMP"),
-        ("契約更新猶予期間", "INTERVAL"),
-        ("契約金額", "NUMERIC"),
-        ("契約書スキャンファイル", "OBJECT"),
+        ("契約番号", "VARCHAR", 20, None, "NO", "YES"),
+        ("契約開始日", "DATE", None, None, "NO", None),
+        ("契約締結日時", "TIMESTAMP", None, None, "YES", None),
+        ("契約更新猶予期間", "INTERVAL", None, None, "YES", None),
+        ("契約金額", "NUMERIC", 12, 2, "YES", None),
+        ("契約書スキャンファイル", "OBJECT", None, None, "YES", None),
     ]),
     ("T_問い合わせ対応記録", "TABLE", [
-        ("対応履歴番号", "VARCHAR"),
-        ("受付日時", "TIMESTAMP"),
-        ("対応開始時刻", "TIME"),
-        ("対応所要時間", "INTERVAL"),
-        ("満足度評価スコア", "REAL"),
-        ("対応記録添付ファイル", "OBJECT"),
+        ("対応履歴番号", "VARCHAR", 20, None, "NO", "YES"),
+        ("受付日時", "TIMESTAMP", None, None, "NO", None),
+        ("対応開始時刻", "TIME", None, None, "YES", None),
+        ("対応所要時間", "INTERVAL", None, None, "YES", None),
+        ("満足度評価スコア", "REAL", None, None, "YES", None),
+        ("対応記録添付ファイル", "OBJECT", None, None, "YES", None),
     ]),
     ("T_勤怠記録", "TABLE", [
-        ("勤怠記録番号", "VARCHAR"),
-        ("勤務日", "DATE"),
-        ("出勤時刻", "TIME"),
-        ("退勤時刻", "TIME"),
-        ("休憩時間", "INTERVAL"),
-        ("残業手当", "NUMERIC"),
-        ("体温測定値", "REAL"),
+        ("勤怠記録番号", "VARCHAR", 20, None, "NO", "YES"),
+        ("勤務日", "DATE", None, None, "NO", None),
+        ("出勤時刻", "TIME", None, None, "YES", None),
+        ("退勤時刻", "TIME", None, None, "YES", None),
+        ("休憩時間", "INTERVAL", None, None, "YES", None),
+        ("残業手当", "NUMERIC", 10, 2, "YES", None),
+        ("体温測定値", "REAL", None, None, "YES", None),
     ]),
 ]
 
@@ -105,13 +110,23 @@ SCHEMA_TYPE_COVERAGE = [
 def main() -> None:
     columns_out = []
     for table_name, table_type, columns in SCHEMA + SCHEMA_TYPE_COVERAGE:
-        for ordinal, (column_name, data_type) in enumerate(columns, start=1):
+        for ordinal, col in enumerate(columns, start=1):
+            # DD-033: SCHEMA(精度等の情報なし)は(column_name, data_type)の2要素のまま、
+            # SCHEMA_TYPE_COVERAGEは(column_name, data_type, column_size, decimal_digits,
+            # is_nullable, is_unique)の6要素。どちらの形式でも動くよう後ろをNoneで埋める
+            column_name, data_type, column_size, decimal_digits, is_nullable, is_unique = (
+                tuple(col) + (None,) * (6 - len(col))
+            )
             columns_out.append({
                 "table_name": table_name,
                 "table_type": table_type,
                 "column_name": column_name,
                 "data_type": data_type,
                 "ordinal": ordinal,
+                "column_size": column_size,
+                "decimal_digits": decimal_digits,
+                "is_nullable": is_nullable,
+                "is_unique": is_unique,
             })
 
     OUT_PATH.write_text(
